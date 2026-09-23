@@ -3,28 +3,6 @@
 .env.*
 !.env.example
 
-# Playwright MCP артефакты
-.playwright-mcp/
-
-# Рабочие файлы обсуждения, в репозиторий не попадают
-.local-notes/
-.claude/
-консилиум.md
-консилиум-анкеты/
-консилиум-позиции/
-
-# Локальные планы, правила и материалы невыбранных задач
-/docs/superpowers/
-/Положение хакатона.md
-/Задачи.md
-/docs/tracks/energy-wind-forecast.md
-/docs/tracks/akim-5-hours.md
-/задачи-материалы/t11_положение_ред8.md
-/задачи-материалы/t11_положение_ред9.md
-
-# Визуальный компаньон brainstorming
-.superpowers/
-
 # Виртуальные окружения и проверка чистого запуска
 .venv/
 .clean-check/
@@ -34,6 +12,18 @@ __pycache__/
 *.pyc
 .pytest_cache/
 
-# Скриншоты Playwright
+# Локальные материалы команды
+.local-notes/
+.claude/
+.playwright-mcp/
+.superpowers/
+docs/superpowers/
+docs/tracks/
+консилиум.md
+консилиум-анкеты/
+консилиум-позиции/
+/Положение хакатона.md
+/Задачи.md
+/задачи-материалы/
 shot-*.jpeg
 shot-*.png
