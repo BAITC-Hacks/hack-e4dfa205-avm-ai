@@ -70,7 +70,7 @@ def test_template_explanation_example():
     r2 = evaluate(CITY, s); c2 = find_improvements(CITY, s); f2 = build_facts(CITY, r2, c2)
     t2 = template_explanation(CITY, r2, c2, f2, INDEX, None)
     texts = " ".join(x["text"] for x in t2["risks"])
-    assert "не срабатывает бонус" in texts and "платформы обращений" in texts and "Безопасные переходы" in texts
+    assert "бонус связки" in texts and "платформы обращений" in texts and "Безопасные переходы" in texts
 
 
 def test_explain_without_key_uses_template(monkeypatch):
