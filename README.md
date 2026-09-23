@@ -108,7 +108,7 @@ Linux / macOS:
 
 Ранее команда зафиксировала следующие проверки коммита `9ace8dd` без `.env` в новом виртуальном окружении. Они относятся к той версии, а не ко всем последующим изменениям:
 
-- Ubuntu 24.04, Python 3.12.3, 23.09.2026 17:29 (коммит 54c8d92): 63 теста, сервер отдаёт страницу (`GET /` → 200) и отвечает на `/api/health` (`ranking_available: true`), `/api/evaluate` (Score 56.54307), `/api/explain` (`mode: template`).
+- Ubuntu 24.04, Python 3.12.3, 23.09.2026 17:32 (коммит 840a532): 65 тестов, сервер отдаёт страницу (`GET /` → 200) и отвечает на `/api/health` (`ranking_available: true`), `/api/evaluate` (Score 56.54307), `/api/explain` (`mode: template`).
 - Windows 11, Python 3.12.8, 23.09.2026 16:52, коммит 9ace8dd: 60 тестов; `/`, `/static/app.js`, `/static/app.css`, `/static/img/map.jpg`, `/docs` отвечают 200; `/api/evaluate` даёт Score 56.54307 и ранг 99,9%; `/api/explain` в режиме `template`; `/api/improvements` возвращает три замены; `/api/chat` без ключа отвечает `mode: unavailable`. Страница открыта в браузере: пример из ТЗ считается, «Объяснить» показывает банк ответов.
 
 ## Зависимости
