@@ -177,6 +177,7 @@ function renderPlaques() {
       <div class="plq__n">${esc(d.name)} · ${Math.round(d.population * 100)}%</div>
       <div class="plq__v" data-v="${val}">${fmt(state.shown[d.id] ?? val)}</div>
       <div class="plq__d ${delta > 0 ? 'up' : delta < 0 ? 'down' : ''}">${delta != null ? sgn(delta) + ' к базе' : 'база'}</div>
+      ${d.id === weakest.id ? '<span class="plq__weak" title="Оценка этого района сейчас минимальна: она входит в Score с весом 0,3">слабейший район</span>' : ''}
       ${v.crit ? `<span class="plq__bad" title="Показателей ниже ${state.city.critical_threshold}: ${v.crit}">${v.crit}</span>` : ''}
     </button>`;
   }).join('');
@@ -584,7 +585,7 @@ async function sendChat(text) {
   state.chat.push({ role: 'user', content: text.trim() });
   state.chatBusy = true; renderAdvisor();
   try {
-    const payload = JSON.parse(body()); payload.messages = state.chat.slice(-20);
+    const payload = JSON.parse(body()); payload.messages = state.chat.slice(-20).map(m => ({ role: m.role, content: m.content }));
     const j = await post('/api/chat', JSON.stringify(payload));
     state.chat.push({ role: 'assistant', content: j.reply, mode: j.mode, checked: j.numbers_checked });
   } catch (e) {
@@ -630,9 +631,9 @@ function renderAdvisor() {
   const mode = x ? x.mode : null;
   const badge = state.explainBusy ? '<span class="mode"><span class="spinner"></span>думаем</span>'
     : mode === 'live' ? `<span class="mode mode--live" title="${esc(x.model || '')}">AI · ${x.key_source === 'user' ? 'ваш ключ' : 'ключ сервера'}</span>`
-    : mode === 'template' ? '<span class="mode mode--fallback" title="Тексты собраны из расчёта без модели">банк ответов</span>'
+    : mode === 'template' ? '<span class="mode mode--fallback" title="Разбор собран автоматически на основе расчёта, без нейросети">автоматический разбор</span>'
     : mode === 'error' ? '<span class="mode mode--fallback">ошибка</span>' : '';
-  const stmt = it => `<li>${esc(it.text)}${it.fact_ids?.length ? `<span class="fid" title="${esc(factText(it.fact_ids))}">${it.fact_ids.join(' ')}</span>` : ''}</li>`;
+  const stmt = it => `<li title="${esc(factText(it.fact_ids || []))}">${esc(it.text)}</li>`;
   let bodyHtml = '';
   if (state.explainBusy) bodyHtml = '<p class="advisor__empty"><span class="spinner"></span>Советник читает расчёт…</p>';
   else if (!x) bodyHtml = '<p class="advisor__empty">Нажмите «Объяснить»: советник разберёт сильные стороны, риски и предложит замены. Ключ OpenAI подключается в настройках, без него ответ соберётся из расчёта.</p>';
@@ -643,7 +644,7 @@ function renderAdvisor() {
       ${x.comparison ? `<p class="advisor__cmp">${esc(x.comparison)}</p>` : ''}
       <h4 class="good">Сильные стороны</h4><ul>${e.strengths.map(stmt).join('')}</ul>
       <h4 class="warn">Риски и компромиссы</h4><ul>${e.risks.map(stmt).join('')}</ul>
-      ${mode === 'template' && x.reason && x.reason !== 'not_configured' ? `<p class="advisor__empty">Модель не ответила (${esc(x.reason)}), показан разбор из расчёта.</p>` : ''}`;
+      ${mode === 'template' ? `<p class="advisor__empty">Разбор собран автоматически на основе расчёта, без нейросети.</p>` : ''}`;
   }
   const cands = state.candidates;
   const candHtml = cands == null ? '' : cands.length === 0 ? '<h4>Улучшения</h4><p class="advisor__empty">Улучшений заменой одной меры не найдено.</p>'
@@ -721,7 +722,7 @@ function openHow() {
       <ol class="how__steps"><li>У вас бюджет <b>${c.budget}</b> единиц и пять районов с десятью показателями от 0 до 100.</li><li>Выберите ровно <b>${c.decisions_required}</b> мер из ${c.measures.length}. Для районной меры укажите район, городская действует на все районы.</li><li>После пятого решения сервер пересчитывает показатели и Score, советник объясняет результат.</li></ol></div>
     <div class="dlg__sec"><h4>Формула</h4>
       <div class="how__formula">Score = 0,7 × средний по городу + 0,3 × слабейший район − число показателей ниже ${c.critical_threshold}</div>
-      <ul class="how__list"><li>Эффект меры умножается на (${c.horizon} − лаг) / ${c.horizon}: чем позже мера заработает, тем меньше даст за горизонт.</li><li>Средний по городу взвешен по доле населения районов.</li><li>Слабейший район даёт 30 % веса: нельзя вытянуть один район и забыть про остальные.</li><li>Каждый показатель ниже ${c.critical_threshold} отнимает балл.</li></ul></div>
+      <ul class="how__list"><li>Эффект меры умножается на (${c.horizon} − лаг) / ${c.horizon}: чем позже мера заработает, тем меньше даст за горизонт.</li><li>Средний по городу взвешен по доле населения районов.</li><li>Слабейший район даёт 30 % веса: нельзя вытянуть один район и забыть про остальные. На карте он отмечен кольцом и подписью «слабейший район», бейдж с цифрой показывает число показателей ниже ${c.critical_threshold}.</li><li>Каждый показатель ниже ${c.critical_threshold} отнимает балл.</li></ul></div>
     <div class="dlg__sec"><h4>Ограничения</h4>
       <ul class="how__list"><li>Бюджет ${c.budget}, остаток не сгорает и не даёт бонуса.</li><li>Каждая мера один раз, не более ${c.max_per_direction} мер из одного направления.</li></ul>
       <h4 style="margin-top:12px">Синергии</h4><ul class="how__list">${syn}</ul>
