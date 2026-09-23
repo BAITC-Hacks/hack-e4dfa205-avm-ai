@@ -760,3 +760,19 @@ h1, h2, h3 { margin: 0; font-family: var(--font-display); letter-spacing: .1px; 
 .keystat--bad b { color: var(--bad); }
 @keyframes keyshake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-4px); } 75% { transform: translateX(4px); } }
 .keyrow input.is-bad { border-color: var(--bad); box-shadow: 0 0 0 3px var(--bad-soft); }
+
+/* ===== дрон ===== */
+.patrol-marker--drone { width: 3.2%; z-index: 5; transform: translate(-50%, -160%); animation: patrol-hover 2.6s ease-in-out infinite; }
+.patrol-marker--drone:hover { transform: translate(-50%, -164%) scale(1.12); }
+@keyframes patrol-hover { 0%, 100% { margin-top: 0; } 50% { margin-top: -6px; } }
+.patrol-marker--drone .patrol-shadow { position: absolute; left: 50%; top: 165%; width: 60%; height: 18%; transform: translateX(-50%); border-radius: 50%; background: rgba(15,42,74,.22); filter: blur(3px); }
+.patrol-emoji { display: block; font-size: 34px; line-height: 1; text-align: center; }
+.patrol-tag--drone { background: #5a3fb8; }
+.patrol-marker--drone:hover .patrol-tag { background: #7454d8; }
+.patrol-units { margin-left: auto; margin-right: 10px; display: flex; gap: 4px; padding: 3px; background: rgba(255,255,255,.1); border-radius: 10px; }
+.patrol-unit { padding: 6px 12px; border-radius: 8px; border: 0; background: transparent; color: rgba(255,255,255,.7); font: 600 13px/1 var(--font-body); cursor: pointer; }
+.patrol-unit.on { background: #fff; color: var(--ink); }
+.patrol-cam--drone { filter: saturate(.85) brightness(.95); transform: scale(1.25) translateY(-8%); }
+.patrol-box--gas { border-color: #ff6a5b; border-style: dashed; background: rgba(255,106,91,.12); }
+.patrol-box--gas span { background: #ff6a5b; color: #fff; }
+.patrol-concept { padding: 6px 12px 10px; font-size: 11px; color: rgba(255,255,255,.45); }
