@@ -1812,6 +1812,9 @@ python -m uvicorn app:app --port 8001
 ---
 
 
+
+
+
 ---
 
 ## Часть 2. Советник: ранжирование, банк ответов, ключ из интерфейса, диалог
@@ -2008,13 +2011,36 @@ if __name__ == "__main__":
 
 ```python
 # engine/templates.py
-"""Банк ответов советника без модели: тексты собираются из фактов, глобального топа и правил.
+"""Банк ответов советника без модели: короткие понятные фразы из фактов, глобального топа и правил.
 Возвращает ту же структуру, что и живое объяснение, плюс поле comparison."""
 from __future__ import annotations
 from .model import City
 
-DISTRICT_LOC = {"esil": "в Есиле", "almaty": "в районе Алматы", "saryarka": "в Сарыарке", "baikonur": "в Байконуре", "nura": "в Нуре"}
-DISTRICT_GEN = {"esil": "Есиля", "almaty": "Алматы", "saryarka": "Сарыарки", "baikonur": "Байконура", "nura": "Нуры"}
+# Короткие названия мер: (именительный, родительный, винительный, множественное число)
+SHORT = {
+    "M1": ("автобусные полосы", "автобусных полос", "автобусные полосы", True),
+    "M2": ("умные светофоры", "умных светофоров", "умные светофоры", True),
+    "M3": ("ЛРТ", "ЛРТ", "ЛРТ", False),
+    "M4": ("парк", "парка", "парк", False),
+    "M5": ("чистое топливо", "чистого топлива", "чистое топливо", False),
+    "M6": ("озеленение города", "озеленения города", "озеленение города", False),
+    "M7": ("школа с детсадом", "школы с детсадом", "школу с детсадом", False),
+    "M8": ("поликлиника", "поликлиники", "поликлинику", False),
+    "M9": ("спорт-площадки", "спорт-площадок", "спорт-площадки", True),
+    "M10": ("камеры и освещение", "камер и освещения", "камеры и освещение", True),
+    "M11": ("безопасные переходы", "безопасных переходов", "безопасные переходы", True),
+    "M12": ("платформа обращений", "платформы обращений", "платформу обращений", False),
+    "M13": ("новые теплосети", "новых теплосетей", "новые теплосети", True),
+    "M14": ("аварийные бригады", "аварийных бригад", "аварийные бригады", True),
+}
+IND = {
+    "T1": "дороги", "T2": "транспорт", "E1": "озеленение", "E2": "воздух", "S1": "школы", "S2": "поликлиники",
+    "B1": "безопасность улиц", "B2": "безопасность на дорогах", "C1": "ЖКХ", "C2": "обращения жителей",
+}
+LOC = {"esil": "в Есиле", "almaty": "в Алматы", "saryarka": "в Сарыарке", "baikonur": "в Байконуре", "nura": "в Нуре"}
+NAME = {"esil": "Есиль", "almaty": "Алматы", "saryarka": "Сарыарка", "baikonur": "Байконур", "nura": "Нура"}
+GEN = {"esil": "Есиля", "almaty": "Алматы", "saryarka": "Сарыарки", "baikonur": "Байконура", "nura": "Нуры"}
+CASES = {"nom": 0, "gen": 1, "acc": 2}
 
 
 def plural(n: float, one: str, few: str, many: str) -> str:
@@ -2025,18 +2051,42 @@ def plural(n: float, one: str, few: str, many: str) -> str:
     return one if r == 1 else few if 2 <= r <= 4 else many
 
 
-def fmt(x: float, n: int = 2) -> str:
+def fmt(x: float, n: int = 1) -> str:
     return f"{x:.{n}f}".replace(".", ",")
 
 
-def sgn(x: float, n: int = 2) -> str:
+def sgn(x: float, n: int = 1) -> str:
     return ("+" if x >= 0 else "−") + fmt(abs(x), n)
 
 
-def measure_phrase(city: City, d: dict) -> str:
-    m = city.measures[d["measure_id"]]
-    where = DISTRICT_LOC.get(d.get("district_id") or "", "по всему городу")
-    return f"{m.id} «{m.name}» {where}"
+def cap(s: str) -> str:
+    return s[:1].upper() + s[1:]
+
+
+def mname(city: City, mid: str, case: str = "nom") -> str:
+    if mid in SHORT:
+        return SHORT[mid][CASES[case]]
+    return city.measures[mid].name.lower()
+
+
+def is_plural(mid: str) -> bool:
+    return SHORT.get(mid, (None, None, None, False))[3]
+
+
+def verb(mid: str, singular: str, plural_: str) -> str:
+    return plural_ if is_plural(mid) else singular
+
+
+def iname(city: City, code: str) -> str:
+    return IND.get(code, city.indicator_names.get(code, code).lower())
+
+
+def where(did: str | None) -> str:
+    return LOC.get(did or "", "по всему городу")
+
+
+def measure_phrase(city: City, d: dict, case: str = "nom") -> str:
+    return f"{mname(city, d['measure_id'], case)} {where(d.get('district_id'))}"
 
 
 def _facts_by(facts: list, kind: str) -> list:
@@ -2048,107 +2098,109 @@ def _ids(*facts) -> list:
 
 
 def template_explanation(city: City, result: dict, candidates: list, facts: list, index: dict | None, rank: dict | None) -> dict:
-    score_f = _facts_by(facts, "score")[0]
     dec_f = _facts_by(facts, "decomposition")[0]
     worst_f = _facts_by(facts, "worst_district")[0]
+    plan_f = _facts_by(facts, "plan")[0]
     delta = result["delta"]
     dc = result["decomposition"]
     worst = min(result["district_results"], key=lambda d: d["score_after"])
 
-    # Резюме
+    # Резюме: три коротких предложения
     if delta < 0:
-        opener = f"План ухудшает город: Score {fmt(result['score'])} против базы {fmt(result['baseline_score'])}, {sgn(delta)}."
+        opener = "Этот план делает городу хуже."
     elif delta < 1:
-        opener = f"План почти не меняет картину: Score {fmt(result['score'])}, {sgn(delta)} к базе {fmt(result['baseline_score'])}."
+        opener = "План почти ничего не меняет."
     elif delta < 3:
-        opener = f"План умеренно улучшает город: Score {fmt(result['score'])}, {sgn(delta)} к базе {fmt(result['baseline_score'])}."
+        opener = "Неплохой план."
     else:
-        opener = f"План заметно улучшает город: Score {fmt(result['score'])}, {sgn(delta)} к базе {fmt(result['baseline_score'])}."
-    parts = [opener]
+        opener = "Сильный план."
+    parts = [opener, f"Оценка города {fmt(result['score'])} вместо {fmt(result['baseline_score'])} на старте."]
     if rank:
-        if rank["top_position"]:
-            parts.append(f"Это {rank['top_position']}-е место среди всех {rank['total']} допустимых планов.")
+        if rank["top_position"] == 1:
+            parts.append(f"Это лучший из всех {rank['total']} вариантов.")
+        elif rank["top_position"]:
+            parts.append(f"Это {rank['top_position']}-е место среди {rank['total']} вариантов.")
         elif rank["percentile"] >= 99.95:
-            parts.append(f"Он входит в лучшие 0,1% из {rank['total']} допустимых планов.")
+            parts.append("Лучше 99,9% всех вариантов.")
         else:
-            parts.append(f"Он лучше {fmt(rank['percentile'], 1)}% из {rank['total']} допустимых планов.")
-    parts.append(f"Слабейший район после решений {worst['name']}: {fmt(worst['score_after'])} (было {fmt(worst['score_before'])}).")
+            parts.append(f"Лучше {fmt(rank['percentile'])}% всех вариантов.")
+    parts.append(f"Самый слабый район всё ещё {worst['name']}: {fmt(worst['score_after'])}.")
     summary = " ".join(parts)
 
     # Сильные стороны
     strengths = []
     if dc["avg"] > 1e-9:
-        strengths.append({"text": f"Средний результат города вырос: вклад в Score {sgn(dc['avg'])}.", "fact_ids": _ids(dec_f)})
+        strengths.append({"text": f"Город в целом стал лучше ({sgn(dc['avg'], 2)}).", "fact_ids": _ids(dec_f)})
     if dc["min"] > 1e-9:
-        strengths.append({"text": f"Слабейший район подтянут: вклад в Score {sgn(dc['min'])}.", "fact_ids": _ids(dec_f)})
+        strengths.append({"text": f"Самый слабый район подтянулся ({sgn(dc['min'], 2)}).", "fact_ids": _ids(dec_f)})
     if dc["crit"] > 1e-9:
         n = int(round(dc["crit"]))
-        strengths.append({"text": f"Снято {n} {plural(n, 'критический показатель', 'критических показателя', 'критических показателей')}, штраф уменьшен на {n} {plural(n, 'балл', 'балла', 'баллов')}.",
+        strengths.append({"text": f"{plural(n, 'Убран', 'Убраны', 'Убраны')} {n} {plural(n, 'провал', 'провала', 'провалов')} ниже 40, штраф снят.",
                           "fact_ids": _ids(dec_f, *_facts_by(facts, "no_critical"))})
     for f in _facts_by(facts, "synergy"):
         s = f["data"]
-        strengths.append({"text": f"Сработала синергия {s['pair']}: {s['indicator']} +{s['bonus']} {DISTRICT_LOC.get(s['district_id'], '')} без задержки.", "fact_ids": _ids(f)})
+        a, b = s["pair"].split("+")
+        strengths.append({"text": f"{cap(mname(city, a))} плюс {mname(city, b)} дают бонус: {iname(city, s['indicator'])} {where(s['district_id'])} +{s['bonus']}.", "fact_ids": _ids(f)})
     grown = sorted(_facts_by(facts, "district"), key=lambda f: -f["data"]["gain"])[:2]
     for f in grown:
         d = f["data"]
         if d["gain"] > 1e-9:
-            name = city.district(d["district_id"]).name
-            strengths.append({"text": f"{name}: оценка района {fmt(d['score_before'])} → {fmt(d['score_after'])}.", "fact_ids": _ids(f)})
+            strengths.append({"text": f"{NAME[d['district_id']]}: {fmt(d['score_before'])} → {fmt(d['score_after'])}.", "fact_ids": _ids(f)})
     if not strengths:
-        strengths.append({"text": "Заметных сильных сторон у плана нет: ни одно слагаемое Score не выросло.", "fact_ids": _ids(dec_f)})
+        strengths.append({"text": "Хвалить нечего: ни одна часть оценки не выросла.", "fact_ids": _ids(dec_f)})
 
     # Риски
     risks = []
     for f in _facts_by(facts, "critical"):
-        n = f["data"]["count"]
-        risks.append({"text": f"Остались {n} {plural(n, 'критический показатель', 'критических показателя', 'критических показателей')} ниже 40, каждый отнимает балл: " +
-                      ", ".join(f"{p['indicator']} {DISTRICT_LOC.get(p['district_id'], '')} {fmt(p['value'], 1)}" for p in f["data"]["pairs"]) + ".", "fact_ids": _ids(f)})
+        for p in f["data"]["pairs"]:
+            risks.append({"text": f"{cap(iname(city, p['indicator']))} {where(p['district_id'])} всё ещё провалены: {fmt(p['value'], 0)} из 100. Это минус балл.", "fact_ids": _ids(f)})
     for f in _facts_by(facts, "measure"):
         d = f["data"]
-        neg = [e for e in d["effects"] if e["delta"] < 0]
-        if neg:
-            m = city.measures[d["measure_id"]]
-            risks.append({"text": f"{m.id} «{m.name}» имеет побочный эффект: " + ", ".join(f"{e['code']} {sgn(e['delta'], 1)} {DISTRICT_LOC.get(e['district_id'], '')}" for e in neg) + ".", "fact_ids": _ids(f)})
+        for e in d["effects"]:
+            if e["delta"] < 0:
+                mid = d["measure_id"]
+                risks.append({"text": f"{cap(mname(city, mid))} {where(d['district_id'])} немного {verb(mid, 'ухудшает', 'ухудшают')} показатель «{iname(city, e['code'])}» ({sgn(e['delta'])}).", "fact_ids": _ids(f)})
     for f in _facts_by(facts, "district_unchanged"):
-        risks.append({"text": f"{city.district(f['data']['district_id']).name} остаётся без внимания: ни одна мера его не касается.", "fact_ids": _ids(f)})
-    slow = [f for f in _facts_by(facts, "measure") if f["data"]["realized_fraction"] <= 0.5]
-    for f in slow:
-        m = city.measures[f["data"]["measure_id"]]
-        pct = int(round(f["data"]["realized_fraction"] * 100))
-        risks.append({"text": f"{m.id} «{m.name}» заработает только через {m.lag} {plural(m.lag, 'квартал', 'квартала', 'кварталов')}: за горизонт реализуется {pct}% эффекта.", "fact_ids": _ids(f)})
+        risks.append({"text": f"{NAME[f['data']['district_id']]} остался без внимания.", "fact_ids": _ids(f)})
     chosen = {d["measure_id"] for d in result["decisions"]}
     for s in city.synergies:
         a, b = s["pair"]
         if (a in chosen) != (b in chosen):
             have, miss = (a, b) if a in chosen else (b, a)
-            risks.append({"text": f"Упущена синергия {a}+{b}: выбрана {have}, без {miss} бонус {s['indicator']} +{s['bonus']} не сработает.", "fact_ids": _ids(_facts_by(facts, "plan")[0])})
-    if result["remaining_budget"] >= 10:
-        risks.append({"text": f"Не потрачено {result['remaining_budget']} {plural(result['remaining_budget'], 'единица', 'единицы', 'единиц')} бюджета, остаток не даёт бонуса: возможно, одну меру стоит заменить на более сильную.", "fact_ids": _ids(_facts_by(facts, "plan")[0])})
+            risks.append({"text": f"{cap(mname(city, have))} без {mname(city, miss, 'gen')} {verb(have, 'работает', 'работают')} вполсилы. Вместе был бы бонус +{s['bonus']} к показателю «{iname(city, s['indicator'])}».", "fact_ids": _ids(plan_f)})
+    for f in _facts_by(facts, "measure"):
+        d = f["data"]
+        if d["realized_fraction"] <= 0.5:
+            m = city.measures[d["measure_id"]]
+            risks.append({"text": f"{cap(mname(city, m.id))} {where(d['district_id'])} {verb(m.id, 'заработает', 'заработают')} только через {m.lag} {plural(m.lag, 'квартал', 'квартала', 'кварталов')}. Полного эффекта за два года не будет.", "fact_ids": _ids(f)})
+    rb = result["remaining_budget"]
+    if rb >= 10:
+        risks.append({"text": f"{rb} {plural(rb, 'единица', 'единицы', 'единиц')} бюджета не потрачены. Остаток ничего не даёт.", "fact_ids": _ids(plan_f)})
     if not risks:
-        risks.append({"text": f"{worst['name']} остаётся слабейшим районом ({fmt(worst['score_after'])}), его показатели ограничивают итог.", "fact_ids": _ids(worst_f)})
+        risks.append({"text": f"{worst['name']} остаётся самым слабым районом. Пока так, итог выше не поднять.", "fact_ids": _ids(worst_f)})
     risks = risks[:5]
 
-    # Предложения: сначала проверенные альтернативы, потом сравнение с глобальным лучшим
+    # Что можно сделать
     suggestions = []
     for f in _facts_by(facts, "candidate"):
         c = next(x for x in candidates if x["id"] == f["data"]["candidate_id"])
         suggestions.append({"candidate_id": c["id"],
-                            "text": f"Заменить {measure_phrase(city, c['replace'])} на {measure_phrase(city, c['with'])}: Score {fmt(c['score'])}, {sgn(c['delta'])}, стоимость {c['cost']}.",
+                            "text": f"Замените {measure_phrase(city, c['replace'], 'acc')} на {measure_phrase(city, c['with'], 'acc')}. Оценка станет {fmt(c['score'])} ({sgn(c['delta'], 2)}), бюджет {c['cost']}.",
                             "fact_ids": _ids(f)})
 
     comparison = None
     if index and index.get("top"):
         best = index["top"][0]
         if best["scenario_key"] == result["scenario_key"]:
-            comparison = f"Это лучший из {index['total']} допустимых планов, выше {fmt(best['score'])} по этой модели подняться нельзя."
+            comparison = f"Это лучший план из всех. Выше {fmt(best['score'])} в этой модели не подняться."
         else:
             mine = {(d["measure_id"], d.get("district_id")) for d in result["decisions"]}
             theirs = {(d["measure_id"], d.get("district_id")) for d in best["decisions"]}
             remove = [d for d in result["decisions"] if (d["measure_id"], d.get("district_id")) not in theirs]
             add = [d for d in best["decisions"] if (d["measure_id"], d.get("district_id")) not in mine]
-            comparison = (f"Лучший план даёт {fmt(best['score'])} при стоимости {best['cost']}, у вас {fmt(result['score'])}, разница {fmt(best['score'] - result['score'])}. "
-                          f"Чтобы прийти к нему: убрать " + ", ".join(measure_phrase(city, d) for d in remove) +
-                          "; добавить " + ", ".join(measure_phrase(city, d) for d in add) + ".")
+            comparison = (f"Лучший план даёт {fmt(best['score'])}, вам не хватает {fmt(best['score'] - result['score'])}. "
+                          f"В нём вместо {', '.join(measure_phrase(city, d, 'gen') for d in remove)} "
+                          f"стоят {', '.join(measure_phrase(city, d) for d in add)}.")
     return {"summary": summary, "strengths": strengths[:5], "risks": risks, "suggestions": suggestions, "comparison": comparison}
 ```
 
@@ -2377,7 +2429,7 @@ def chat(city: City, result: dict, candidates: list, facts: list, index: dict | 
     if index:
         for t in index["top"][:5]:
             top_lines.append(f"{t['rank']}. Score {t['score']:.2f}, стоимость {t['cost']}: " +
-                             "; ".join(f"{d['measure_id']} " + (city.district(d['district_id']).name if d.get('district_id') else "город") for d in t["decisions"]))
+                             "; ".join(f"«{city.measures[d['measure_id']].name}» ({d['measure_id']}, " + (city.district(d['district_id']).name if d.get('district_id') else "весь город") + ")" for d in t["decisions"]))
     system = (CHAT_PROMPT + "\n\nФакты о текущем плане:\n" + "\n".join(f"{f['id']}: {f['text']}" for f in facts) +
               "\n\nСравнение с лучшим планом: " + (template["comparison"] or "нет данных") +
               "\n\nЛучшие планы из полного перебора:\n" + ("\n".join(top_lines) or "нет данных"))
@@ -2467,9 +2519,9 @@ def test_template_explanation_example():
     r, c, f = _prep()
     rank = rank_info(INDEX, r["scenario_key"], r["score"])
     t = template_explanation(CITY, r, c, f, INDEX, rank)
-    assert "56,54" in t["summary"] and "допустимых планов" in t["summary"]
+    assert "56,5" in t["summary"] and "вариантов" in t["summary"]
     assert t["strengths"] and t["risks"] and len(t["suggestions"]) == len(c)
-    assert t["comparison"] and "57,24" in t["comparison"] and "убрать" in t["comparison"]
+    assert t["comparison"] and "57,2" in t["comparison"] and "вместо" in t["comparison"]
     ids = {x["id"] for x in f}
     for key in ("strengths", "risks", "suggestions"):
         for it in t[key]:
@@ -2480,7 +2532,7 @@ def test_template_explanation_example():
     r2 = evaluate(CITY, s); c2 = find_improvements(CITY, s); f2 = build_facts(CITY, r2, c2)
     t2 = template_explanation(CITY, r2, c2, f2, INDEX, None)
     texts = " ".join(x["text"] for x in t2["risks"])
-    assert "Упущена синергия M10+M12" in texts and "M11" in texts
+    assert "вполсилы" in texts and "платформы обращений" in texts and "Безопасные переходы" in texts
 
 
 def test_explain_without_key_uses_template(monkeypatch):
