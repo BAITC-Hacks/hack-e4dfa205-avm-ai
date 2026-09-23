@@ -40,11 +40,16 @@ def enumerate_valid(city: City):
 def build_index(city: City) -> dict:
     scores = []
     top = []
+    best_by_cost = {}  # стоимость -> лучший план этой стоимости (для Парето «цена → Score»)
     for dec in enumerate_valid(city):
         agg = aggregate(city, apply_effects(city, dec))
         cost = sum(city.measures[d["measure_id"]].cost for d in dec)
         scores.append(agg["score"])
-        top.append((agg["score"], cost, scenario_key(dec), normalize(dec), agg["minimum"], agg["critical_count"]))
+        row = (agg["score"], cost, scenario_key(dec), normalize(dec), agg["minimum"], agg["critical_count"])
+        top.append(row)
+        cur = best_by_cost.get(cost)
+        if cur is None or (row[0], -row[1], row[2]) > (cur[0], -cur[1], cur[2]):
+            best_by_cost[cost] = row
         if len(top) > TOP_N * 20:
             top.sort(key=lambda x: (-x[0], x[1], x[2]))
             del top[TOP_N:]
@@ -53,10 +58,17 @@ def build_index(city: City) -> dict:
     scores.sort()
     step = max(1, len(scores) // QUANTILES)
     quantiles = scores[::step]
+    pareto = []  # по возрастанию стоимости оставляем только строгие улучшения Score
+    best_so_far = float("-inf")
+    for cost in sorted(best_by_cost):
+        s, c, k, d, mn, cc = best_by_cost[cost]
+        if s > best_so_far + 1e-9:
+            pareto.append({"cost": c, "score": s, "scenario_key": k, "decisions": d, "minimum": mn, "critical_count": cc})
+            best_so_far = s
     return {
         "dataset_version": city.version, "total": len(scores),
         "score_min": scores[0], "score_max": scores[-1],
-        "quantiles": quantiles,
+        "quantiles": quantiles, "pareto": pareto,
         "top": [{"rank": i + 1, "score": s, "cost": c, "scenario_key": k, "decisions": d, "minimum": mn, "critical_count": cc}
                 for i, (s, c, k, d, mn, cc) in enumerate(top)],
     }
