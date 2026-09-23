@@ -8,9 +8,11 @@ def normalize(decisions: list) -> list:
     """Нормализованный набор: без district_id у городских мер, отсортирован по номеру меры."""
     out = []
     for d in decisions:
-        mid = d.get("measure_id", "")
+        if not isinstance(d, dict):
+            d = {}
+        mid = str(d.get("measure_id") or "")
         did = d.get("district_id") or None
-        out.append({"measure_id": mid, "district_id": did} if did else {"measure_id": mid})
+        out.append({"measure_id": mid, "district_id": str(did)} if did else {"measure_id": mid})
     return sorted(out, key=lambda x: (_measure_number(x["measure_id"]), x.get("district_id") or ""))
 
 

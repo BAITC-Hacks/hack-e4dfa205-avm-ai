@@ -19,6 +19,9 @@ def validate(city: City, decisions: list) -> list:
 
     known = []  # (index, Measure, district_id or None)
     for i, d in enumerate(decisions):
+        if not isinstance(d, dict):
+            errors.append(_err("unknown_measure", "Решение должно быть объектом с measure_id", [], [i]))
+            continue
         mid = d.get("measure_id")
         did = d.get("district_id") or None
         m = city.measures.get(mid)
@@ -38,8 +41,9 @@ def validate(city: City, decisions: list) -> list:
         known.append((i, m, did if m.scope == "district" else None))
 
     positions = defaultdict(list)
-    for i, m, _ in known:
-        positions[m.id].append(i)
+    for i, d in enumerate(decisions):
+        if isinstance(d, dict) and d.get("measure_id") in city.measures:
+            positions[d["measure_id"]].append(i)
     for mid, idx in positions.items():
         if len(idx) > 1:
             errors.append(_err("duplicate_measure", f"Мера {mid} выбрана {len(idx)} раза, допускается один раз", [mid], idx))

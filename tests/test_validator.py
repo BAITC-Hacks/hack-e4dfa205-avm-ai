@@ -89,3 +89,8 @@ def test_conflict_same_district_only():
     assert by_code(same, "incompatible_measures")["scope"] == "same_district"
     assert "incompatible_measures" not in codes(diff)
     assert validate(CITY, diff) == []
+
+
+def test_duplicates_counted_even_when_rows_invalid():
+    s = [{"measure_id": "M1"}] * 5
+    assert "duplicate_measure" in codes(s) and "district_required" in codes(s)

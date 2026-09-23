@@ -110,3 +110,10 @@ def test_minimum_follows_weakest_district_not_nura():
     agg = aggregate(CITY, apply_effects(CITY, [], base=base))
     assert agg["minimum"] == pytest.approx(41.0)
     assert min(agg["per"], key=agg["per"].get) == "esil"
+
+
+def test_null_measure_id_is_error_not_crash():
+    r = evaluate(CITY, [{"measure_id": None}] + EXAMPLE[1:])
+    assert r["valid"] is False and any(e["code"] == "unknown_measure" for e in r["errors"])
+    r = evaluate(CITY, ["M7"] + EXAMPLE[1:])
+    assert r["valid"] is False and any(e["code"] == "unknown_measure" for e in r["errors"])
