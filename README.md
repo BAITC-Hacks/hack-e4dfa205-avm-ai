@@ -80,7 +80,10 @@ python -m uvicorn app:app --port 8000
 - Интерактивная документация API (Swagger, все маршруты можно вызвать из браузера): http://localhost:8000/docs.
 - Автотесты, 60 штук, без сети и без ключей: `pytest -q`.
 
-Чистый запуск проверен: Ubuntu 24.04, Python 3.12.3, 23.09.2026 16:52, режим без ключа. Копия файлов репозитория без `.env` в новом окружении: `pip install -r requirements.txt`, `pytest -q` (60 passed), сервер на порту 8001 отдаёт страницу (`GET /` → 200) и отвечает на `/api/health` (`ranking_available: true`), `/api/evaluate` (Score 56.54307), `/api/explain` (`mode: template`).
+Чистый запуск проверен дважды, режим без ключа, из копии зафиксированной версии без `.env` в новом виртуальном окружении (`pip install -r requirements.txt`, `pytest -q`, `python -m uvicorn app:app --port 8001`):
+
+- Ubuntu 24.04, Python 3.12.3, 23.09.2026 16:52: 60 тестов, сервер отдаёт страницу (`GET /` → 200) и отвечает на `/api/health` (`ranking_available: true`), `/api/evaluate` (Score 56.54307), `/api/explain` (`mode: template`).
+- Windows 11, Python 3.12.8, 23.09.2026 16:52, коммит 9ace8dd: 60 тестов; `/`, `/static/app.js`, `/static/app.css`, `/static/img/map.jpg`, `/docs` отвечают 200; `/api/evaluate` даёт Score 56.54307 и ранг 99,9%; `/api/explain` в режиме `template`; `/api/improvements` возвращает три замены; `/api/chat` без ключа отвечает `mode: unavailable`. Страница открыта в браузере: пример из ТЗ считается, «Объяснить» показывает банк ответов.
 
 ## Зависимости
 
