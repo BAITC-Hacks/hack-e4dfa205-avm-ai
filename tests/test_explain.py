@@ -69,6 +69,20 @@ def test_invented_number_or_missing_section_is_fallback(monkeypatch):
     assert ex.explain(CITY, r, c, f, call_model=lambda *a: (only_summary, "m"))["mode"] == "template"
 
 
+def test_plausible_wrong_numbers_are_rejected(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "test")
+    r, c, f = _prep()
+    for text in ("Score 0", "Score 95", "Итог вырос до 57,2"):   # 95 это стоимость, 57,2 это число альтернативы
+        bad = json.dumps({"summary": "ок", "strengths": [{"text": text, "fact_ids": ["f2"]}],
+                          "risks": [{"text": "z", "fact_ids": ["f1"]}], "suggestions": []}, ensure_ascii=False)
+        ex.clear_cache()
+        assert ex.explain(CITY, r, c, f, call_model=lambda *a: (bad, "m"))["mode"] == "template", text
+    ex.clear_cache()
+    bad_summary = json.dumps({"summary": "Score 95", "strengths": [{"text": "y", "fact_ids": ["f1"]}],
+                              "risks": [{"text": "z", "fact_ids": ["f1"]}], "suggestions": []})
+    assert ex.explain(CITY, r, c, f, call_model=lambda *a: (bad_summary, "m"))["mode"] == "template"
+
+
 def test_rounded_fact_number_is_accepted(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "test")
     r, c, f = _prep()

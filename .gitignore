@@ -31,3 +31,7 @@
 __pycache__/
 *.pyc
 .pytest_cache/
+
+# Скриншоты Playwright
+shot-*.jpeg
+shot-*.png

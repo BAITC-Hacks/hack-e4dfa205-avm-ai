@@ -17,7 +17,10 @@ def normalize(decisions: list) -> list:
 
 
 def _measure_number(mid: str) -> int:
-    return int(mid[1:]) if mid[1:].isdigit() else 999
+    try:
+        return int(mid[1:])
+    except (ValueError, TypeError):
+        return 999
 
 
 def scenario_key(decisions: list) -> str:

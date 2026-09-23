@@ -112,6 +112,11 @@ def test_minimum_follows_weakest_district_not_nura():
     assert min(agg["per"], key=agg["per"].get) == "esil"
 
 
+def test_superscript_digit_id_is_error_not_crash():
+    r = evaluate(CITY, [{"measure_id": "M\u00b2", "district_id": "nura"}] + EXAMPLE[1:])
+    assert r["valid"] is False and any(e["code"] == "unknown_measure" for e in r["errors"])
+
+
 def test_null_measure_id_is_error_not_crash():
     r = evaluate(CITY, [{"measure_id": None}] + EXAMPLE[1:])
     assert r["valid"] is False and any(e["code"] == "unknown_measure" for e in r["errors"])

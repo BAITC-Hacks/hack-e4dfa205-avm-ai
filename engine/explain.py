@@ -121,10 +121,16 @@ def _allowed_numbers(facts: list, extra: list | None = None) -> set:
     return vals
 
 
+# Числа, которые можно называть без факта: количество мер и решений, горизонт, порог, бюджет
+FREE_NUMBERS = {1.0, 2.0, 3.0, 4.0, 5.0, 8.0, 40.0, 100.0}
+
+
 def _numbers_ok(text: str, allowed: set) -> bool:
+    """Каждое число в тексте должно быть среди чисел разрешённых фактов (с допуском на округление)
+    или в коротком списке общих констант. Проверка лексическая: смысл утверждения она не подтверждает."""
     for s in NUM_RE.findall(text):
         v = float(s.replace(",", "."))
-        if v.is_integer() and 0 <= v <= 14:
+        if v in FREE_NUMBERS:
             continue
         if any(abs(v - a) <= 0.051 for a in allowed):
             continue
@@ -132,7 +138,12 @@ def _numbers_ok(text: str, allowed: set) -> bool:
     return True
 
 
-def _statement(item, fact_ids: set, allowed: set) -> dict:
+def _numbers_of(facts: list, ids) -> set:
+    """Числа только тех фактов, на которые ссылается утверждение."""
+    return _allowed_numbers([f for f in facts if f["id"] in set(ids)])
+
+
+def _statement(item, fact_ids: set, facts: list) -> dict:
     if not isinstance(item, dict) or set(item) - {"text", "fact_ids", "candidate_id"}:
         raise ValueError("bad statement shape")
     text = item.get("text")
@@ -141,7 +152,7 @@ def _statement(item, fact_ids: set, allowed: set) -> dict:
         raise ValueError("bad text")
     if not isinstance(ids, list) or not ids or not all(isinstance(i, str) for i in ids) or not set(ids) <= fact_ids:
         raise ValueError("unknown fact id")
-    if not _numbers_ok(text, allowed):
+    if not _numbers_ok(text, _numbers_of(facts, ids)):
         raise ValueError("invented number")
     return {"text": text.strip(), "fact_ids": ids}
 
@@ -152,9 +163,10 @@ def validate_answer(text: str, facts: list, candidates: list) -> dict:
         raise ValueError("bad top-level shape")
     fact_ids = {f["id"] for f in facts}
     cand_ids = {c["id"] for c in candidates}
-    allowed = _allowed_numbers(facts)
+    # Резюме опирается на итоговые факты: оценка, разложение, районы, критические значения. Стоимости и альтернативы в резюме числами не называются
+    summary_allowed = _allowed_numbers([f for f in facts if f["kind"] in ("score", "decomposition", "worst_district", "district", "critical", "no_critical", "synergy")])
     summary = data["summary"]
-    if not isinstance(summary, str) or not summary.strip() or len(summary) > 800 or not _numbers_ok(summary, allowed):
+    if not isinstance(summary, str) or not summary.strip() or len(summary) > 800 or not _numbers_ok(summary, summary_allowed):
         raise ValueError("bad summary")
     out = {"summary": summary.strip(), "strengths": [], "risks": [], "suggestions": []}
     for key in ("strengths", "risks"):
@@ -162,7 +174,7 @@ def validate_answer(text: str, facts: list, candidates: list) -> dict:
         if not isinstance(items, list) or not items or len(items) > 5:
             raise ValueError(f"bad {key}")
         for it in items:
-            st = _statement(it, fact_ids, allowed)
+            st = _statement(it, fact_ids, facts)
             if "candidate_id" in it:
                 raise ValueError("candidate_id outside suggestions")
             out[key].append(st)
@@ -171,7 +183,7 @@ def validate_answer(text: str, facts: list, candidates: list) -> dict:
         raise ValueError("bad suggestions")
     used = set()
     for it in sugg:
-        st = _statement(it, fact_ids, allowed)
+        st = _statement(it, fact_ids, facts)
         cid = it.get("candidate_id")
         if cid not in cand_ids or cid in used:
             raise ValueError("unknown or repeated candidate id")

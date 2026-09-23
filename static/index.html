@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Аким на 5 часов</title>
+<meta name="description" content="AI-симулятор управления городом: пять решений, бюджет 100, Astana Quality of Life Score">
+<link rel="stylesheet" href="/static/app.css?v=12">
+</head>
+<body>
+
+<header class="top" id="top">
+  <div class="top__brand">
+    <h1 class="top__title">Аким на 5 часов</h1>
+    <p class="top__sub">AI-симулятор управления городом · <span class="tag">учебная модель</span></p>
+  </div>
+  <div class="budget" id="budget"></div>
+  <div class="counter" id="counter"></div>
+  <div class="top__actions">
+    <button type="button" class="btn" id="btn-example">Пример из ТЗ</button>
+    <button type="button" class="btn btn--ghost" id="btn-reset">Сброс</button>
+    <button type="button" class="btn btn--ghost" id="btn-how" aria-expanded="false" aria-controls="how">Как считается</button>
+  </div>
+</header>
+
+<div class="notice" id="notice" role="status" aria-live="polite" hidden></div>
+<section class="how" id="how" hidden></section>
+
+<main class="stage" id="stage">
+  <div class="stage__map" id="stage-map">
+    <div class="world" id="world">
+      <img class="world__img" id="map-img" src="/static/img/map.jpg?v=3" width="2000" height="1116" alt="Условная изометрическая схема пяти районов Астаны" draggable="false">
+      <div class="cloud"></div><div class="cloud cloud--2"></div><div class="cloud cloud--3"></div>
+      <svg class="map__hot" id="map-hot" viewBox="0 0 2000 1116" width="2000" height="1116" aria-hidden="true"></svg>
+      <div id="map-labels"></div>
+      <div id="map-marks"></div>
+      <div id="map-plaques"></div>
+    </div>
+    <div class="hud hud--score score" id="score" hidden></div>
+    <div class="hud hud--cap">Условная схема, не карта</div>
+    <div class="hud hud--detail card detail" id="detail" hidden></div>
+  </div>
+
+  <aside class="side" id="side">
+    <section class="docket" aria-labelledby="plan-h">
+      <div class="docket__head"><h2 id="plan-h" class="docket__title">План акима</h2><div class="docket__sum" id="plan-sum"></div></div>
+      <div class="docket__slots" id="plan"></div>
+      <div class="plan__actions" id="plan-actions"></div>
+      <div class="plan__status" id="plan-status"></div>
+    </section>
+    <section class="ledger" aria-labelledby="catalog-h">
+      <h2 id="catalog-h" class="ledger__title">Меры <span>не более двух из одного направления</span></h2>
+      <div id="tabs" hidden></div>
+      <div class="ledger__body" id="cards"></div>
+    </section>
+    <div class="advisor card" id="advisor" hidden></div>
+    <p class="side__foot">Данные, меры и формула заданы условиями задачи 12 хакатона HackAlem AI. Районы и показатели условные.</p>
+  </aside>
+</main>
+
+<div class="modal" id="modal" hidden></div>
+
+<script src="/static/app.js?v=14"></script>
+</body>
+</html>

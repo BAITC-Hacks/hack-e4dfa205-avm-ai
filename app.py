@@ -127,6 +127,7 @@ def create_app(call_model=None, chat_model=None, index_path=None) -> FastAPI:
         return out
 
     if (STATIC / "index.html").exists():
+        app.mount("/static", StaticFiles(directory=str(STATIC)), name="static-assets")
         app.mount("/", StaticFiles(directory=str(STATIC), html=True), name="static")
     return app
 
