@@ -729,14 +729,18 @@ function openSettings() {
   </div>`;
   const status = () => {
     const ks = state.keyStatus, el = $('#key-status');
-    el.className = 'dlg__note' + (ks ? (ks.ok ? ' good' : ' bad') : '');
-    el.textContent = ks ? (ks.ok ? `Работает: ${ks.model}, источник: ${ks.key_source === 'user' ? 'ваш ключ' : 'ключ сервера'}` : `Ключ не принят: ${ks.error || ''}`) : (state.key ? 'Ключ введён, нажмите «Проверить».' : 'Ключ не задан. Если ключ задан на сервере, советник использует его.');
+    el.className = 'keystat' + (ks ? (ks.ok ? ' keystat--ok' : ' keystat--bad') : ' keystat--idle');
+    if (ks && ks.ok) el.innerHTML = `<i>✓</i><div><b>Ключ работает</b><span>Модель ${esc(ks.model)}, источник: ${ks.key_source === 'user' ? 'ваш ключ' : 'ключ сервера'}</span></div>`;
+    else if (ks) el.innerHTML = `<i>!</i><div><b>Ключ не подошёл</b><span>Проверьте, что он скопирован целиком и начинается с sk-.${ks.error ? ' Ответ сервера: ' + esc(ks.error) : ''}</span></div>`;
+    else el.innerHTML = `<i>·</i><div><b>${state.key ? 'Ключ введён' : 'Ключ не задан'}</b><span>${state.key ? 'Нажмите «Проверить», чтобы убедиться, что он работает.' : 'Если ключ задан на сервере, советник использует его. Без ключа разбор соберётся из расчёта.'}</span></div>`;
   };
   status();
   const ki = $('#key-input');
+  const mark = () => ki.classList.toggle('is-bad', !!(state.keyStatus && !state.keyStatus.ok));
+  mark();
   const save = () => { state.key = ki.value.trim(); try { sessionStorage.setItem('akim.key', state.key); } catch (e) {} };
   ki.addEventListener('change', () => { save(); state.keyStatus = null; status(); });
-  $('#key-check').addEventListener('click', async () => { save(); $('#key-check').disabled = true; await checkKey(); $('#key-check').disabled = false; status(); if (typeof renderAdvisor === 'function') renderAdvisor(); });
+  $('#key-check').addEventListener('click', async () => { save(); $('#key-check').disabled = true; await checkKey(); $('#key-check').disabled = false; status(); mark(); if (typeof renderAdvisor === 'function') renderAdvisor(); });
   box.querySelector('[data-clear]').addEventListener('click', () => { ki.value = ''; save(); state.keyStatus = null; status(); });
   box.querySelector('[data-close]').addEventListener('click', closeModal);
   box.onclick = e => { if (e.target === box) closeModal(); };
@@ -748,10 +752,10 @@ const GEAR = '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke
 const ONB = [
   { img: '/static/img/advisor.png', kicker: 'Шаг 1 из 3', title: 'Вы аким на пять часов', lead: 'Под вашим управлением 5 районов города: Есиль, Алматы, Сарыарка, Байконур и Нура.',
     points: ['У каждого района 10 показателей по шкале от 0 до 100.', 'Ваш бюджет: <b>100</b> единиц.', 'За всё время вы можете принять ровно <b>5</b> решений.', 'Задача: поднять общий балл города и не бросить самый слабый район.'] },
-  { img: '/static/img/ic-school.png', kicker: 'Шаг 2 из 3', title: 'Стройте', lead: 'Справа список из 14 мер.',
-    points: ['Нажмите меру и выберите район. Постройка появится на карте.', 'Из одного направления можно взять не больше <b>двух</b> мер.', 'Некоторые меры нельзя ставить вместе. Бюджет превысить нельзя.'] },
-  { img: '/static/img/patrol-dog.png', kicker: 'Шаг 3 из 3', title: 'Результат и совет', lead: 'После пятого решения город пересчитается.',
-    points: ['Вы увидите новый балл и что изменилось в каждом районе.', 'Советник скажет, что вышло хорошо, а что рискованно, и предложит замену.', 'Робот-собака Go2 ходит по городу и показывает, где больше всего сигналов.'] },
+  { img: '/static/img/ic-school.png', kicker: 'Шаг 2 из 3', title: 'Как принимать решения', lead: 'Справа список из 14 мер по 5 направлениям: транспорт, экология, соцсфера, безопасность и сервисы.',
+    points: ['Нажмите на меру и выберите район. Постройка появится на карте.', 'Из одного направления можно взять не больше <b>2</b> мер.', 'Некоторые меры нельзя сочетать, окно постройки об этом предупредит.', 'Бюджет превысить нельзя. Остаток не сгорает.'] },
+  { img: '/static/img/patrol-dog.png', kicker: 'Шаг 3 из 3', title: 'Что будет после пятого решения', lead: 'Как только вы примете 5 решений, город пересчитается.',
+    points: ['Вы увидите новый балл города и изменения в каждом районе.', 'Советник акима объяснит, что вышло хорошо, а что рискованно, и предложит замену.', 'Робот-собака Go2 патрулирует город: нажмите на неё, чтобы увидеть камеру и сигналы по районам.'] },
 ];
 function openOnboarding(step = 0) {
   const o = ONB[step];

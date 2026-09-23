@@ -729,3 +729,34 @@ h1, h2, h3 { margin: 0; font-family: var(--font-display); letter-spacing: .1px; 
 
 .onb__img { width: 112px; height: 112px; padding: 10px; border-radius: 18px; background: linear-gradient(180deg, #ffffff, #e9eef5); box-shadow: 0 14px 30px rgba(0,0,0,.35), inset 0 1px 0 #fff; margin: 0; filter: none; }
 .dlg--how .dlg__head { align-items: center; }
+
+/* ===== патруль: кликабельность и уведомления ===== */
+.patrol-marker { transition: transform .2s ease, filter .2s ease; }
+.patrol-marker:hover { transform: translate(-50%, -84%) scale(1.12); filter: drop-shadow(0 10px 10px rgba(15,42,74,.35)); }
+.patrol-tag { display: inline-flex; align-items: center; gap: 6px; background: var(--accent); }
+.patrol-dot { width: 7px; height: 7px; border-radius: 50%; background: #ff3b30; animation: patrol-blink 1s infinite; }
+.patrol-toast { position: absolute; left: 16px; bottom: 44px; z-index: 6; display: flex; align-items: center; gap: 12px; width: min(420px, calc(100% - 32px)); padding: 10px 12px; border-radius: 14px; background: rgba(15,42,74,.94); color: #fff; box-shadow: 0 14px 34px rgba(15,42,74,.35); animation: patrol-in .4s var(--ease-settle) both; }
+.patrol-toast--out { animation: patrol-out .3s ease-in both; }
+@keyframes patrol-out { to { transform: translateY(8px); opacity: 0; } }
+.patrol-toast img { width: 44px; height: 44px; object-fit: contain; background: #fff; border-radius: 10px; padding: 4px; }
+.patrol-toast__b { flex: 1; min-width: 0; }
+.patrol-toast__k { font: 700 10.5px/1 var(--font-display); letter-spacing: .6px; text-transform: uppercase; color: #9fd3ff; }
+.patrol-toast__t { font-size: 13px; line-height: 1.35; margin-top: 3px; }
+.patrol-toast__btn { padding: 8px 12px; border-radius: 9px; border: 0; background: #fff; color: var(--ink); font-weight: 700; font-size: 13px; cursor: pointer; }
+.patrol-toast__btn:hover { background: #e6eef9; }
+.patrol-toast__x { border: 0; background: transparent; color: rgba(255,255,255,.6); font-size: 18px; line-height: 1; cursor: pointer; padding: 4px; }
+.patrol-toast__x:hover { color: #fff; }
+
+/* ===== статус ключа ===== */
+.keystat { display: flex; gap: 10px; align-items: flex-start; margin-top: 10px; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); }
+.keystat i { flex: none; width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font: 700 13px/1 var(--font-body); font-style: normal; background: #cdd6e2; color: #fff; }
+.keystat b { display: block; font-size: 13.5px; color: var(--ink); }
+.keystat span { display: block; font-size: 12.5px; color: var(--ink-2); margin-top: 2px; line-height: 1.4; }
+.keystat--ok { background: var(--good-soft); border-color: #bfe3cd; }
+.keystat--ok i { background: var(--good); }
+.keystat--ok b { color: var(--good); }
+.keystat--bad { background: var(--bad-soft); border-color: #efc2be; animation: keyshake .35s ease; }
+.keystat--bad i { background: var(--bad); }
+.keystat--bad b { color: var(--bad); }
+@keyframes keyshake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-4px); } 75% { transform: translateX(4px); } }
+.keyrow input.is-bad { border-color: var(--bad); box-shadow: 0 0 0 3px var(--bad-soft); }

@@ -142,9 +142,26 @@ function closeCamera() {
   const b = $('#patrol-modal'); if (b) b.remove();
 }
 
+/* Уведомления патруля: подсказывают, что собака кликабельна */
+let toastIdx = 0;
+function showToast() {
+  if (state.open || document.querySelector('.patrol-toast') || !document.getElementById('modal')?.hidden) return;
+  const e = EVENTS[toastIdx % EVENTS.length]; toastIdx++;
+  const t = document.createElement('div');
+  t.className = 'patrol-toast';
+  t.innerHTML = `<img src="/static/img/patrol-dog.png" alt=""><div class="patrol-toast__b"><div class="patrol-toast__k">Патруль Go2 · ${DIST[e.d]}</div><div class="patrol-toast__t">${esc(e.t)}</div></div><button type="button" class="patrol-toast__btn">Камера</button><button type="button" class="patrol-toast__x" aria-label="Закрыть">×</button>`;
+  $('#stage-map').appendChild(t);
+  const close = () => { t.classList.add('patrol-toast--out'); setTimeout(() => t.remove(), 300); };
+  t.querySelector('.patrol-toast__btn').addEventListener('click', () => { close(); openCamera(); });
+  t.querySelector('.patrol-toast__x').addEventListener('click', close);
+  setTimeout(() => { if (t.isConnected) close(); }, 9000);
+}
+
 function boot() {
   if (!$('#map-marks')) { setTimeout(boot, 300); return; }
   ensureMarker();
+  setTimeout(showToast, 12000);
+  setInterval(showToast, 45000);
   state.raf = requestAnimationFrame(step);
   // маркер живёт поверх построек: при перерисовке маркеров возвращаем его
   const mo = new MutationObserver(() => { if (!$('#patrol-marker')) ensureMarker(); });
