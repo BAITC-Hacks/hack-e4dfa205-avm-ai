@@ -385,6 +385,7 @@ function openBuild(id) {
 }
 let modalOpener = null;
 function closeModal() {
+  state.advisorOpen = false; // любой путь закрытия (Escape, подложка, ×) сбрасывает флаг советника
   if (state.modal && state.modal.detail) { state.detail = null; document.querySelectorAll('#map-hot polygon, .plq').forEach(p => p.classList.remove('is-open')); }
   state.modal = null; $('#modal').hidden = true; $('#modal').innerHTML = '';
   document.querySelectorAll('.top, .stage').forEach(el => el.removeAttribute('inert'));
