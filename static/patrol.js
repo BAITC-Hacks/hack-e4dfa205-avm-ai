@@ -151,7 +151,6 @@ function openCamera(unit) {
     <div class="patrol-dlg__head"><div><div class="patrol-kicker">${drone ? 'Экология и безопасность · Дрон · Astana Dynamics · демо' : 'Безопасный город · робот-собака Go2 · демо'}</div><h3>${drone ? 'Камера дрона · в полёте · высота 80 м' : 'Камера патруля'}</h3></div>
       <div class="patrol-units"><button type="button" class="patrol-unit ${drone ? '' : 'on'}" data-unit="dog">Go2</button><button type="button" class="patrol-unit ${drone ? 'on' : ''}" data-unit="drone">Дрон</button></div>
       <button type="button" class="patrol-close" aria-label="Закрыть">×</button></div>
-    <div class="patrol-demo" role="note">Демонстрация концепции: камера и события заранее заданы, реального робота и потока нет.</div>
     <div class="patrol-body">
       <div class="patrol-cam">
         <img src="${drone ? '/static/img/patrol-dronecam.jpg' : '/static/img/patrol-cam.jpg'}" alt="Демонстрационный кадр: как выглядел бы кадр с камеры ${drone ? 'дрона' : 'робота-собаки'}">
