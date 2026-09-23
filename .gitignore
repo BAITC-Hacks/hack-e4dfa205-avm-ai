@@ -26,3 +26,8 @@
 # Виртуальные окружения и проверка чистого запуска
 .venv/
 .clean-check/
+
+# Кэш Python и pytest
+__pycache__/
+*.pyc
+.pytest_cache/
