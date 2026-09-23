@@ -77,6 +77,7 @@ python -m uvicorn app:app --port 8000
 
 - Проверка, что сервер жив: http://localhost:8000/api/health отвечает `{"status":"ok","dataset_version":"hackalem-12-v1","ai_configured":false,"ranking_available":true,"total_plans":694395}` (`ai_configured: true`, если задан ключ OpenAI).
 - Страница приложения: http://localhost:8000 (сервер раздаёт `static/index.html`).
+- Интерактивная документация API (Swagger, все маршруты можно вызвать из браузера): http://localhost:8000/docs.
 - Автотесты, 58 штук, без сети и без ключей: `pytest -q`.
 
 Чистый запуск проверен: Ubuntu 24.04, Python 3.12.3, 23.09.2026 16:27, режим без ключа. Копия файлов репозитория без `.env` в новом окружении: `pip install -r requirements.txt`, `pytest -q` (58 passed), сервер на порту 8001 отвечает на `/api/health` (`ranking_available: true`), `/api/evaluate` (Score 56.54307), `/api/explain` (`mode: template`).
