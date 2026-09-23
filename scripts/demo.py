@@ -88,6 +88,13 @@ def main(argv: list | None = None) -> int:
         print(f"Полный перебор: {total} допустимых планов (data/top_sets.json). Пример из ТЗ лучше {rank['percentile']:.1f}% планов, "
               f"до лучшего не хватает {f2(rank['gap_to_best'])}.")
         print(f"Лучший план по модели: Score {f2(best['score'])} за {best['cost']}: " + "; ".join(dec_str(city, d) for d in best["decisions"]))
+        pareto = index.get("pareto", [])
+        if pareto:
+            print("Парето «стоимость → лучший Score»: " + "; ".join(f"{p['cost']} → {f2(p['score'])}" for p in pareto))
+            cheaper = [p for p in pareto if p["cost"] < r["cost"] and p["score"] > r["score"]]
+            if cheaper:
+                p0 = cheaper[0]
+                print(f"Заметьте: план за {p0['cost']} даёт {f2(p0['score'])} — больше, чем пример из ТЗ за {r['cost']} ({f2(r['score'])}).")
     else:
         print("Индекс перебора не найден: python scripts/rank_all.py")
 

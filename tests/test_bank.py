@@ -157,3 +157,17 @@ def test_cache_respects_missing_key(monkeypatch):
     assert ex.explain(CITY, r, c, f, call_model=lambda *a: (good, "A"))["mode"] == "template"
     monkeypatch.setenv("OPENAI_API_KEY", "k")
     assert ex.explain(CITY, r, c, f, call_model=lambda *a: (good, "B"))["model"] == "B"
+
+
+def test_pareto_frontier_cost_vs_score():
+    # Парето: для каждого уровня стоимости лучший достижимый Score; стоимость и Score строго растут
+    pareto = INDEX["pareto"]
+    assert pareto and pareto[-1]["score"] == pytest.approx(INDEX["score_max"], abs=1e-9)
+    for a, b in zip(pareto, pareto[1:]):
+        assert a["cost"] < b["cost"] and a["score"] < b["score"]
+    for p in pareto[:5] + pareto[-3:]:
+        checked = evaluate(CITY, p["decisions"])
+        assert checked["valid"] and checked["cost"] == p["cost"] and checked["score"] == pytest.approx(p["score"], abs=1e-9)
+    client = TestClient(create_app())
+    t = client.get("/api/top?limit=1").json()
+    assert t["pareto"][0]["cost"] == pareto[0]["cost"] and len(t["pareto"]) == len(pareto)

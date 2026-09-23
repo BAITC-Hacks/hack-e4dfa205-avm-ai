@@ -90,7 +90,8 @@ def create_app(call_model=None, chat_model=None, index_path=None) -> FastAPI:
     def top(limit: int = 5):
         if not index:
             return {"total": None, "top": []}
-        return {"total": index["total"], "score_max": index["score_max"], "top": index["top"][:max(1, min(limit, 100))]}
+        return {"total": index["total"], "score_max": index["score_max"], "top": index["top"][:max(1, min(limit, 100))],
+                "pareto": index.get("pareto", [])}
 
     @app.post("/api/evaluate")
     def api_evaluate(s: ScenarioIn):

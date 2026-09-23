@@ -14,4 +14,4 @@ if __name__ == "__main__":
     index = build_index(city)
     save_index(index, INDEX_PATH)
     print(f"наборов: {index['total']}, лучший: {index['score_max']:.5f}, худший: {index['score_min']:.5f}, "
-          f"топ-1: {index['top'][0]['scenario_key']}, {time.time() - t:.1f} с, файл {INDEX_PATH}")
+          f"топ-1: {index['top'][0]['scenario_key']}, Парето: {len(index['pareto'])} точек, {time.time() - t:.1f} с, файл {INDEX_PATH}")
