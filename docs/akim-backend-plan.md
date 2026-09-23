@@ -178,7 +178,11 @@ pytest==8.3.3
 
 - [ ] **Шаг 2. Установить и проверить**
 
-Команда: `pip install -r requirements.txt && python -c "import fastapi, openai, pytest; print('ok')"`
+Команды по одной (в PowerShell 5.1 оператор `&&` не работает):
+```
+pip install -r requirements.txt
+python -c "import fastapi, openai, pytest; print('ok')"
+```
 Ожидание: `ok`. Если pip не находит версию, взять ближайшую доступную и записать её в файл.
 
 - [ ] **Шаг 3. `engine/__init__.py`**: пустой файл.
@@ -1791,7 +1795,9 @@ FastAPI (MIT), uvicorn (BSD-3), pydantic (MIT), openai-python (Apache 2.0), pyth
 ```
 Remove-Item -Recurse -Force .clean-check -ErrorAction SilentlyContinue
 New-Item -ItemType Directory .clean-check | Out-Null
-git ls-files -co --exclude-standard | tar -cf - -T - | tar -xf - -C .clean-check
+git ls-files -co --exclude-standard | Out-File -Encoding utf8 .clean-check\files.txt
+tar -cf .clean-check\src.tar -T .clean-check\files.txt
+tar -xf .clean-check\src.tar -C .clean-check
 Set-Location .clean-check
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
@@ -1815,6 +1821,8 @@ python -m uvicorn app:app --port 8001
 
 
 
+
+
 ---
 
 ## Часть 2. Советник: ранжирование, банк ответов, ключ из интерфейса, диалог
@@ -1828,7 +1836,7 @@ python -m uvicorn app:app --port 8001
 - `GET /api/top?limit=5`: `{"total": 694395, "score_max": 57.23673, "top": [{"rank": 1, "score": 57.23673, "cost": 98, "scenario_key": "...", "decisions": [...], "minimum": ..., "critical_count": ...}]}`.
 - `POST /api/evaluate` дополнительно: `rank`: `{"percentile": 99.9, "total": 694395, "top_position": null, "best_score": 57.23673, "gap_to_best": 0.69}` или `null` для невалидного набора.
 - `POST /api/explain`: `mode` теперь `live` или `template` (вместо `fallback`); дополнительно `comparison` (строка сравнения с лучшим планом или `null`), `rank`, `key_source` (`user`, `server` или `null`).
-- `POST /api/chat`, тело `{"decisions": [...], "messages": [{"role": "user", "content": "..."}]}` (роли `user` и `assistant`, до 20 сообщений, последнее от пользователя): ответ `{"mode": "live" | "unavailable" | "error", "reply": "...", "verified": true, "model": "gpt-4o-mini"}`. `verified: false` означает, что в ответе есть числа, которых нет в расчёте, фронт показывает пометку «числа не подтверждены расчётом».
+- `POST /api/chat`, тело `{"decisions": [...], "messages": [{"role": "user", "content": "..."}]}` (роли `user` и `assistant`, до 20 сообщений, последнее от пользователя): ответ `{"mode": "live" | "unavailable" | "error", "reply": "...", "numbers_checked": true, "model": "gpt-4o-mini"}`. `numbers_checked` это лексическая проверка: каждое число ответа встречается среди чисел расчёта и топа планов. Смысл утверждений она не подтверждает; при `false` фронт показывает пометку «числа не сверены с расчётом».
 - `POST /api/ai/check` без тела: `{"ok": true, "model": "gpt-4o-mini", "key_source": "user"}` или `{"ok": false, "error": "AuthenticationError", "key_source": ...}`.
 
 ### Задача 10. Укрепление ядра по ревью
@@ -2135,7 +2143,8 @@ def template_explanation(city: City, result: dict, candidates: list, facts: list
         strengths.append({"text": f"Самый слабый район подтянулся ({sgn(dc['min'], 2)}).", "fact_ids": _ids(dec_f)})
     if dc["crit"] > 1e-9:
         n = int(round(dc["crit"]))
-        strengths.append({"text": f"{plural(n, 'Убран', 'Убраны', 'Убраны')} {n} {plural(n, 'провал', 'провала', 'провалов')} ниже 40, штраф снят.",
+        tail = "штраф снят полностью." if not result["critical_pairs"] else f"штраф меньше на {n} {plural(n, 'балл', 'балла', 'баллов')}."
+        strengths.append({"text": f"{plural(n, 'Убран', 'Убраны', 'Убраны')} {n} {plural(n, 'провал', 'провала', 'провалов')} ниже 40, {tail}",
                           "fact_ids": _ids(dec_f, *_facts_by(facts, "no_critical"))})
     for f in _facts_by(facts, "synergy"):
         s = f["data"]
@@ -2167,7 +2176,7 @@ def template_explanation(city: City, result: dict, candidates: list, facts: list
         a, b = s["pair"]
         if (a in chosen) != (b in chosen):
             have, miss = (a, b) if a in chosen else (b, a)
-            risks.append({"text": f"{cap(mname(city, have))} без {mname(city, miss, 'gen')} {verb(have, 'работает', 'работают')} вполсилы. Вместе был бы бонус +{s['bonus']} к показателю «{iname(city, s['indicator'])}».", "fact_ids": _ids(plan_f)})
+            risks.append({"text": f"Без {mname(city, miss, 'gen')} не срабатывает бонус связки с {mname(city, have, 'gen')}: вместе они дали бы ещё +{s['bonus']} к показателю «{iname(city, s['indicator'])}».", "fact_ids": _ids(plan_f)})
     for f in _facts_by(facts, "measure"):
         d = f["data"]
         if d["realized_fraction"] <= 0.5:
@@ -2261,6 +2270,11 @@ def server_key() -> str:
 def resolve_key(user_key: str | None) -> str:
     """Ключ из запроса имеет приоритет над серверным."""
     return (user_key or "").strip() or server_key()
+
+
+def api_key() -> str:
+    """Совместимость со старым app.py: серверный ключ."""
+    return server_key()
 
 
 def model_name() -> str:
@@ -2396,17 +2410,18 @@ def explain(city: City, result: dict, candidates: list, facts: list, call_model=
     key = resolve_key(user_key)
     tag = _key_tag((user_key or "").strip())
     cache_key = f"{city.version}|{PROMPT_VERSION}|{model_name()}|{tag}|{result['scenario_key']}"
-    if cache_key in _cache:
-        return _cache[cache_key]
     template = template_explanation(city, result, candidates, facts, index, rank)
     base = {"scenario_key": result["scenario_key"], "facts": facts, "rank": rank, "comparison": template["comparison"],
             "key_source": "user" if (user_key or "").strip() else ("server" if server_key() else None)}
     try:
         if not key:
             raise NotConfigured()
+        cached = _cache.get(cache_key)
+        if cached and cached[0] is call:  # кэш действует только для того же провайдера
+            return cached[1]
         text, model = call(facts, candidates, key)
         out = {**base, "mode": "live", "model": model, "reason": None, "explanation": validate_answer(text, facts, candidates)}
-        _cache[cache_key] = out
+        _cache[cache_key] = (call, out)
         while len(_cache) > MAX_CACHE:
             _cache.popitem(last=False)
         return out
@@ -2423,7 +2438,7 @@ def chat(city: City, result: dict, candidates: list, facts: list, index: dict | 
     """Диалог с советником. Без ключа возвращает mode=unavailable. Числа в ответе проверяются по фактам."""
     key = resolve_key(user_key)
     if not key:
-        return {"mode": "unavailable", "reply": "Диалог с советником доступен только с ключом OpenAI: серверным или введённым в интерфейсе.", "verified": False, "model": None}
+        return {"mode": "unavailable", "reply": "Диалог с советником доступен только с ключом OpenAI: серверным или введённым в интерфейсе.", "numbers_checked": False, "model": None}
     template = template_explanation(city, result, candidates, facts, index, rank)
     top_lines = []
     if index:
@@ -2435,22 +2450,27 @@ def chat(city: City, result: dict, candidates: list, facts: list, index: dict | 
               "\n\nЛучшие планы из полного перебора:\n" + ("\n".join(top_lines) or "нет данных"))
     trimmed = [{"role": m["role"], "content": str(m["content"])[:2000]} for m in messages[-10:] if m.get("role") in ("user", "assistant")]
     if not trimmed or trimmed[-1]["role"] != "user":
-        return {"mode": "error", "reply": "Последнее сообщение должно быть от пользователя.", "verified": False, "model": None}
+        return {"mode": "error", "reply": "Последнее сообщение должно быть от пользователя.", "numbers_checked": False, "model": None}
     call = call_model or call_openai_chat
     try:
         text, model = call(system, trimmed, key)
     except Exception as e:
-        return {"mode": "error", "reply": f"Модель недоступна: {type(e).__name__}. Расчёт и шаблонное объяснение работают.", "verified": False, "model": None}
-    extra = [t["score"] for t in index["top"][:5]] + [index["total"], index["score_max"]] if index else []
-    verified = _numbers_ok(text, _allowed_numbers(facts, extra))
-    return {"mode": "live", "reply": text.strip(), "verified": verified, "model": model}
+        return {"mode": "error", "reply": f"Модель недоступна: {type(e).__name__}. Расчёт и шаблонное объяснение работают.", "numbers_checked": False, "model": None}
+    extra = []
+    if index:
+        for t in index["top"][:5]:
+            extra += [t["score"], t["cost"], t["rank"]]
+        extra += [index["total"], index["score_max"]]
+    # Лексическая проверка: каждое число ответа есть среди чисел расчёта. Смысл утверждений она не подтверждает.
+    numbers_checked = _numbers_ok(text, _allowed_numbers(facts, extra))
+    return {"mode": "live", "reply": text.strip(), "numbers_checked": numbers_checked, "model": model}
 ```
 
 - [ ] **Шаг 6. В `tests/test_explain.py` и `tests/test_api.py` заменить все `"fallback"` на `"template"`.**
 
 Команда (Git Bash): `sed -i 's/"fallback"/"template"/g' tests/test_explain.py tests/test_api.py`
 
-- [ ] **Шаг 7. Запустить**: `pytest -q`, ожидание: все тесты проходят. `test_api.py` пока работает со старым `app.py`, это нормально: старые маршруты не менялись.
+- [ ] **Шаг 7. Запустить**: `pytest -q`, ожидание: все тесты проходят. старый `app.py` продолжает импортировать `api_key`, эта функция сохранена в новом `explain.py` для совместимости, поэтому сервер работает до задачи 12.
 - [ ] **Шаг 8. Коммит по разрешению.** `feat: полный перебор планов, глобальный топ, банк ответов советника`. Файлы: `engine/ranking.py scripts/rank_all.py engine/templates.py engine/explain.py data/top_sets.json tests/test_explain.py tests/test_api.py`
 
 ### Задача 12. Ключ из интерфейса, топ, ранг и диалог в API
@@ -2532,7 +2552,7 @@ def test_template_explanation_example():
     r2 = evaluate(CITY, s); c2 = find_improvements(CITY, s); f2 = build_facts(CITY, r2, c2)
     t2 = template_explanation(CITY, r2, c2, f2, INDEX, None)
     texts = " ".join(x["text"] for x in t2["risks"])
-    assert "вполсилы" in texts and "платформы обращений" in texts and "Безопасные переходы" in texts
+    assert "не срабатывает бонус" in texts and "платформы обращений" in texts and "Безопасные переходы" in texts
 
 
 def test_explain_without_key_uses_template(monkeypatch):
@@ -2568,10 +2588,13 @@ def test_chat_modes(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "k")
     ok = ex.chat(CITY, r, c, f, INDEX, None, [{"role": "user", "content": "что улучшить?"}],
                  call_model=lambda system, msgs, key: ("Замените M5 на M3 в Нуре, Score 57,21.", "m"))
-    assert ok["mode"] == "live" and ok["verified"] is True
+    assert ok["mode"] == "live" and ok["numbers_checked"] is True
+    top_ok = ex.chat(CITY, r, c, f, INDEX, None, [{"role": "user", "content": "?"}],
+                     call_model=lambda system, msgs, key: ("Лучший план стоит 98 и даёт Score 57,24", "m"))
+    assert top_ok["numbers_checked"] is True
     bad = ex.chat(CITY, r, c, f, INDEX, None, [{"role": "user", "content": "?"}],
                   call_model=lambda system, msgs, key: ("Score станет 99,9", "m"))
-    assert bad["mode"] == "live" and bad["verified"] is False
+    assert bad["mode"] == "live" and bad["numbers_checked"] is False
     err = ex.chat(CITY, r, c, f, INDEX, None, [{"role": "user", "content": "?"}],
                   call_model=lambda *a: (_ for _ in ()).throw(TimeoutError()))
     assert err["mode"] == "error"
@@ -2598,8 +2621,24 @@ def test_api_top_rank_chat_and_key_header(monkeypatch):
     assert ch["mode"] == "unavailable"
     ch = client.post("/api/chat", json={**BODY, "messages": [{"role": "user", "content": "привет"}]},
                      headers={"X-OpenAI-Key": "user-key"}).json()
-    assert ch["mode"] == "live" and ch["verified"] is True and calls == ["user-key"]
+    assert ch["mode"] == "live" and ch["numbers_checked"] is True and calls == ["user-key"]
     assert client.post("/api/chat", json={**BODY, "messages": [{"role": "user", "content": "x", "extra": 1}]}).status_code == 422
+    assert client.post("/api/chat", json={**BODY, "messages": []}).status_code == 422
+    assert client.post("/api/chat", json={**BODY, "messages": [{"role": "system", "content": "x"}]}).status_code == 422
+    assert client.post("/api/chat", json={**BODY, "messages": [{"role": "assistant", "content": "x"}]}).status_code == 422
+
+
+def test_cache_respects_missing_key(monkeypatch):
+    r, c, f = _prep()
+    good = json.dumps({"summary": "ок", "strengths": [{"text": "s", "fact_ids": ["f1"]}],
+                       "risks": [{"text": "r", "fact_ids": ["f2"]}], "suggestions": []})
+    ex.clear_cache()
+    monkeypatch.setenv("OPENAI_API_KEY", "k")
+    assert ex.explain(CITY, r, c, f, call_model=lambda *a: (good, "A"))["mode"] == "live"
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    assert ex.explain(CITY, r, c, f, call_model=lambda *a: (good, "A"))["mode"] == "template"
+    monkeypatch.setenv("OPENAI_API_KEY", "k")
+    assert ex.explain(CITY, r, c, f, call_model=lambda *a: (good, "B"))["model"] == "B"
 ```
 
 - [ ] **Шаг 2. Запустить**: `pytest tests/test_bank.py -q`, ожидание: падения на отсутствующих маршрутах.
@@ -2610,7 +2649,7 @@ def test_api_top_rank_chat_and_key_header(monkeypatch):
 # app.py
 from __future__ import annotations
 from pathlib import Path
-from typing import Optional
+from typing import Literal, Optional
 from dotenv import load_dotenv
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -2643,14 +2682,14 @@ class ScenarioIn(BaseModel):
 
 class ChatMessage(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
-    role: str = Field(max_length=16)
-    content: str = Field(max_length=2000)
+    role: Literal["user", "assistant"]
+    content: str = Field(min_length=1, max_length=2000)
 
 
 class ChatIn(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     decisions: list[Decision] = Field(max_length=10)
-    messages: list[ChatMessage] = Field(max_length=20)
+    messages: list[ChatMessage] = Field(min_length=1, max_length=20)
 
 
 class BodyLimitMiddleware(BaseHTTPMiddleware):
@@ -2723,6 +2762,8 @@ def create_app(call_model=None, chat_model=None, index_path=None) -> FastAPI:
         d, r = valid_or_422(s)
         cands = find_improvements(city, d)
         facts = build_facts(city, r, cands)
+        if s.messages[-1].role != "user":
+            raise HTTPException(status_code=422, detail={"errors": [{"code": "last_message_not_user", "message": "Последнее сообщение должно быть от пользователя"}]})
         msgs = [{"role": m.role, "content": m.content} for m in s.messages]
         return chat(city, r, cands, facts, index, r["rank"], msgs, user_key=x_openai_key, call_model=chat_model)
 
@@ -2756,9 +2797,9 @@ curl -s -X POST localhost:8000/api/chat -H "Content-Type: application/json" -d '
 
 В PowerShell тело передаётся так: `-d "{\"decisions\":[{\"measure_id\":\"M7\",\"district_id\":\"nura\"},{\"measure_id\":\"M8\",\"district_id\":\"nura\"},{\"measure_id\":\"M10\",\"district_id\":\"nura\"},{\"measure_id\":\"M12\"},{\"measure_id\":\"M5\",\"district_id\":\"saryarka\"}],\"messages\":[{\"role\":\"user\",\"content\":\"Что поменять, чтобы обогнать лучший план?\"}]}"`.
 
-Ожидание: `ranking_available: true`, три плана в топе, `ok: true`, ответ советника с `mode: live` и `verified: true`.
+Ожидание: `ranking_available: true`, три плана в топе, `ok: true`, ответ советника с `mode: live` и `numbers_checked: true`.
 
-- [ ] **Шаг 6. README.** В таблицу соответствия добавить строки: «AI-рекомендации по улучшению» → `engine/advisor.py`, `engine/ranking.py`, `/api/improvements`, `/api/top`; «Сравнение результатов» → `rank` в `/api/evaluate`, `/api/top`. В раздел про переменные окружения добавить абзац: ключ можно ввести в интерфейсе, он передаётся заголовком `X-OpenAI-Key`, на сервере не сохраняется. В раздел про режимы: `live`, `template` (банк ответов из фактов и полного перебора), диалог доступен только с ключом, поле `verified`.
+- [ ] **Шаг 6. README.** В таблицу соответствия добавить строки: «AI-рекомендации по улучшению» → `engine/advisor.py`, `engine/ranking.py`, `/api/improvements`, `/api/top`; «Сравнение результатов» → `rank` в `/api/evaluate`, `/api/top`. В раздел про переменные окружения добавить абзац: ключ можно ввести в интерфейсе, он передаётся заголовком `X-OpenAI-Key`, на сервере не сохраняется. В раздел про режимы: `live`, `template` (банк ответов из фактов и полного перебора), диалог доступен только с ключом, поле `numbers_checked` и его ограничение.
 
 - [ ] **Шаг 7. Коммит по разрешению.** `feat: ключ OpenAI из интерфейса, топ планов, ранг сценария, диалог с советником`
 
