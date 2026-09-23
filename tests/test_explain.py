@@ -119,3 +119,11 @@ def test_transient_failure_not_cached(monkeypatch):
     ex.clear_cache()
     assert ex.explain(CITY, r, c, f, call_model=flaky)["mode"] == "template"
     assert ex.explain(CITY, r, c, f, call_model=flaky)["mode"] == "live"
+
+
+def test_client_uses_optional_base_url(monkeypatch):
+    # OPENAI_BASE_URL позволяет подключить любой OpenAI-совместимый API (например, NVIDIA NIM) без изменения кода
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+    assert "api.openai.com" in str(ex._client("k").base_url)
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://integrate.api.nvidia.com/v1")
+    assert str(ex._client("k").base_url).startswith("https://integrate.api.nvidia.com/v1")

@@ -50,6 +50,7 @@ data/city.json       данные задачи: районы, показател
 data/top_sets.json   индекс полного перебора: топ-100 планов и квантили, создан scripts/rank_all.py
 engine/              расчётное ядро, советник, ранжирование, объяснение
 scripts/rank_all.py  пересчёт индекса перебора, около 20 секунд
+scripts/demo.py      демонстрация основного сценария в терминале
 static/              страница приложения
 tests/               автотесты ядра и API
 pytest.ini           настройка pytest: корень репозитория в sys.path
@@ -79,6 +80,7 @@ python -m uvicorn app:app --port 8000
 - Страница приложения: http://localhost:8000 (сервер раздаёт `static/index.html`).
 - Интерактивная документация API (Swagger, все маршруты можно вызвать из браузера): http://localhost:8000/docs.
 - Автотесты, 60 штук, без сети и без ключей: `pytest -q`.
+- Демонстрация всего сценария в терминале, без сервера и сети: `python scripts/demo.py` (база, пример ТЗ, отказ по бюджету и конфликту, три улучшения, ранг среди всех планов, объяснение советника).
 
 Чистый запуск проверен дважды, режим без ключа, из копии зафиксированной версии без `.env` в новом виртуальном окружении (`pip install -r requirements.txt`, `pytest -q`, `python -m uvicorn app:app --port 8001`):
 
@@ -98,6 +100,7 @@ python -m uvicorn app:app --port 8000
 | `OPENAI_API_KEY` | Ключ OpenAI для живого AI-объяснения. Пусто: резервный режим, расчёт работает полностью |
 | `OPENAI_MODEL` | Модель, по умолчанию `gpt-4o-mini` |
 | `LLM_TIMEOUT_S` | Таймаут запроса к модели в секундах, по умолчанию 15 |
+| `OPENAI_BASE_URL` | Необязательно: адрес любого OpenAI-совместимого API вместо OpenAI. Например, NVIDIA NIM: `https://integrate.api.nvidia.com/v1` с ключом NVIDIA в `OPENAI_API_KEY` и `OPENAI_MODEL=meta/llama-3.1-70b-instruct`. Код не меняется, переменную читает SDK |
 
 Переменные `ELEVENLABS_*` и `EXA_API_KEY` в `.env.example` относятся к инструментам команды, приложению они не нужны.
 
