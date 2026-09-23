@@ -15,7 +15,7 @@ def _load():
 
 
 def test_demo_runs_offline_and_prints_key_numbers(monkeypatch):
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "")  # пустая переменная процесса имеет приоритет над .env: режим template
     mod = _load()
     buf = io.StringIO()
     with redirect_stdout(buf):
