@@ -43,7 +43,12 @@ tests/test_advisor.py
 tests/test_facts.py
 tests/test_explain.py
 tests/test_api.py
-README.md                     дополняется в задаче 9
+tests/test_bank.py            задача 12
+engine/ranking.py             задача 11
+engine/templates.py           задача 11
+scripts/rank_all.py           задача 11
+data/top_sets.json            задача 11, генерируется скриптом
+README.md                     дополняется в задачах 9 и 12
 ```
 
 Команда полной проверки в любой момент: `pytest -q`. Команда запуска сервера: `python -m uvicorn app:app --port 8000`.
@@ -97,6 +102,8 @@ README.md                     дополняется в задаче 9
 | `POST /api/explain` | `{"scenario_key", "mode": "live" или "fallback", "model", "reason", "explanation", "facts", "candidates"}`; 422 для невалидного набора |
 
 Структурно неверное тело (лишнее поле, неверный тип, больше 10 решений, тело больше 16 КБ) даёт 422 или 413.
+
+После задач 10–12 (часть 2 ниже) к контракту добавляются заголовок `X-OpenAI-Key`, маршруты `/api/top`, `/api/chat`, `/api/ai/check`, поле `rank` в `/api/evaluate` и поля `comparison`, `rank`, `key_source` в `/api/explain`; режим `fallback` переименован в `template`. Фронтенд ориентируется на итоговый контракт из части 2.
 
 `baseline` в `/api/city`:
 
@@ -1803,6 +1810,905 @@ python -m uvicorn app:app --port 8001
 - [ ] **Шаг 6. Коммит по разрешению.** `docs: README, соответствие ТЗ, лицензии, проверка чистого запуска`
 
 ---
+
+
+---
+
+## Часть 2. Советник: ранжирование, банк ответов, ключ из интерфейса, диалог
+
+Задачи 10–12 выполняются строго после задачи 8, параллельно с README из задачи 9 нельзя: обе меняют README. Весь код ниже проверен в отдельном окружении: 57 тестов проходят, живой режим и диалог проверены с реальным ключом. Файлы `engine/explain.py` и `app.py` в этих задачах **заменяются целиком** новыми версиями, а не правятся по кусочкам.
+
+### Что добавляется к контракту для фронтенда
+
+- Заголовок `X-OpenAI-Key` у `POST /api/explain`, `POST /api/chat`, `POST /api/ai/check`: ключ пользователя из интерфейса. Приоритет над серверным ключом. Сервер его не хранит и не логирует. Фронт держит ключ в `sessionStorage`.
+- `GET /api/health` дополнительно: `ranking_available`, `total_plans`.
+- `GET /api/top?limit=5`: `{"total": 694395, "score_max": 57.23673, "top": [{"rank": 1, "score": 57.23673, "cost": 98, "scenario_key": "...", "decisions": [...], "minimum": ..., "critical_count": ...}]}`.
+- `POST /api/evaluate` дополнительно: `rank`: `{"percentile": 99.9, "total": 694395, "top_position": null, "best_score": 57.23673, "gap_to_best": 0.69}` или `null` для невалидного набора.
+- `POST /api/explain`: `mode` теперь `live` или `template` (вместо `fallback`); дополнительно `comparison` (строка сравнения с лучшим планом или `null`), `rank`, `key_source` (`user`, `server` или `null`).
+- `POST /api/chat`, тело `{"decisions": [...], "messages": [{"role": "user", "content": "..."}]}` (роли `user` и `assistant`, до 20 сообщений, последнее от пользователя): ответ `{"mode": "live" | "unavailable" | "error", "reply": "...", "verified": true, "model": "gpt-4o-mini"}`. `verified: false` означает, что в ответе есть числа, которых нет в расчёте, фронт показывает пометку «числа не подтверждены расчётом».
+- `POST /api/ai/check` без тела: `{"ok": true, "model": "gpt-4o-mini", "key_source": "user"}` или `{"ok": false, "error": "AuthenticationError", "key_source": ...}`.
+
+### Задача 10. Укрепление ядра по ревью
+
+**Файлы:** изменить `engine/scoring.py`, `engine/validator.py`, `tests/test_scoring.py`, `tests/test_validator.py`.
+
+- [ ] **Шаг 1. Тесты.** Дописать в конец `tests/test_scoring.py`:
+
+```python
+def test_null_measure_id_is_error_not_crash():
+    r = evaluate(CITY, [{"measure_id": None}] + EXAMPLE[1:])
+    assert r["valid"] is False and any(e["code"] == "unknown_measure" for e in r["errors"])
+    r = evaluate(CITY, ["M7"] + EXAMPLE[1:])
+    assert r["valid"] is False and any(e["code"] == "unknown_measure" for e in r["errors"])
+```
+
+и в конец `tests/test_validator.py`:
+
+```python
+def test_duplicates_counted_even_when_rows_invalid():
+    s = [{"measure_id": "M1"}] * 5
+    assert "duplicate_measure" in codes(s) and "district_required" in codes(s)
+```
+
+- [ ] **Шаг 2. Запустить**: `pytest tests/test_scoring.py tests/test_validator.py -q`, ожидание: два новых теста падают.
+
+- [ ] **Шаг 3. Правка `engine/scoring.py`**, функция `normalize`, цикл заменить на:
+
+```python
+    for d in decisions:
+        if not isinstance(d, dict):
+            d = {}
+        mid = str(d.get("measure_id") or "")
+        did = d.get("district_id") or None
+        out.append({"measure_id": mid, "district_id": str(did)} if did else {"measure_id": mid})
+```
+
+- [ ] **Шаг 4. Правка `engine/validator.py`.** В начале цикла `for i, d in enumerate(decisions):` первыми строками добавить:
+
+```python
+        if not isinstance(d, dict):
+            errors.append(_err("unknown_measure", "Решение должно быть объектом с measure_id", [], [i]))
+            continue
+```
+
+и заменить заполнение `positions` на:
+
+```python
+    positions = defaultdict(list)
+    for i, d in enumerate(decisions):
+        if isinstance(d, dict) and d.get("measure_id") in city.measures:
+            positions[d["measure_id"]].append(i)
+```
+
+- [ ] **Шаг 5. Запустить**: `pytest -q`, ожидание: все тесты проходят.
+- [ ] **Шаг 6. Коммит по разрешению.** `fix: ядро устойчиво к null и не-объектам, повторы считаются до фильтрации`
+
+### Задача 11. Полный перебор, глобальный топ и банк ответов
+
+**Файлы:** создать `engine/ranking.py`, `scripts/rank_all.py`, `engine/templates.py`; заменить целиком `engine/explain.py`; изменить `tests/test_explain.py` и `tests/test_api.py` (строка `"fallback"` → `"template"` везде); создать `data/top_sets.json` скриптом.
+
+- [ ] **Шаг 1. `engine/ranking.py`**
+
+```python
+# engine/ranking.py
+"""Полный перебор всех допустимых наборов: глобальный топ и процентиль пользователя.
+Индекс считается один раз скриптом scripts/rank_all.py и хранится в data/top_sets.json."""
+from __future__ import annotations
+import bisect
+import itertools
+import json
+from collections import Counter
+from pathlib import Path
+from .model import City
+from .scoring import apply_effects, aggregate, scenario_key, normalize
+
+INDEX_PATH = Path(__file__).resolve().parent.parent / "data" / "top_sets.json"
+TOP_N = 100
+QUANTILES = 1000
+
+
+def enumerate_valid(city: City):
+    """Генератор всех допустимых наборов (по правилам ТЗ) без вызова validate: быстрее в 20 раз."""
+    ms = list(city.measures.values())
+    conf_global = [tuple(x["pair"]) for x in city.conflicts if x["scope"] == "global"]
+    conf_same = [tuple(x["pair"]) for x in city.conflicts if x["scope"] == "same_district"]
+    for combo in itertools.combinations(ms, city.decisions_required):
+        if sum(m.cost for m in combo) > city.budget:
+            continue
+        if any(v > city.max_per_direction for v in Counter(m.direction for m in combo).values()):
+            continue
+        ids = {m.id for m in combo}
+        if any(a in ids and b in ids for a, b in conf_global):
+            continue
+        dist = [m for m in combo if m.scope == "district"]
+        cityw = [m for m in combo if m.scope == "city"]
+        for assign in itertools.product(city.district_ids, repeat=len(dist)):
+            place = dict(zip((m.id for m in dist), assign))
+            if any(a in place and b in place and place[a] == place[b] for a, b in conf_same):
+                continue
+            yield [{"measure_id": m.id, "district_id": place[m.id]} for m in dist] + [{"measure_id": m.id} for m in cityw]
+
+
+def build_index(city: City) -> dict:
+    scores = []
+    top = []
+    for dec in enumerate_valid(city):
+        agg = aggregate(city, apply_effects(city, dec))
+        cost = sum(city.measures[d["measure_id"]].cost for d in dec)
+        scores.append(agg["score"])
+        top.append((agg["score"], cost, scenario_key(dec), normalize(dec), agg["minimum"], agg["critical_count"]))
+        if len(top) > TOP_N * 20:
+            top.sort(key=lambda x: (-x[0], x[1], x[2]))
+            del top[TOP_N:]
+    top.sort(key=lambda x: (-x[0], x[1], x[2]))
+    top = top[:TOP_N]
+    scores.sort()
+    step = max(1, len(scores) // QUANTILES)
+    quantiles = scores[::step]
+    return {
+        "dataset_version": city.version, "total": len(scores),
+        "score_min": scores[0], "score_max": scores[-1],
+        "quantiles": quantiles,
+        "top": [{"rank": i + 1, "score": s, "cost": c, "scenario_key": k, "decisions": d, "minimum": mn, "critical_count": cc}
+                for i, (s, c, k, d, mn, cc) in enumerate(top)],
+    }
+
+
+def save_index(index: dict, path: Path = INDEX_PATH) -> None:
+    Path(path).write_text(json.dumps(index, ensure_ascii=False), encoding="utf-8")
+
+
+def load_index(path: Path = INDEX_PATH) -> dict | None:
+    p = Path(path)
+    if not p.exists():
+        return None
+    return json.loads(p.read_text(encoding="utf-8"))
+
+
+def rank_info(index: dict | None, scenario_key_: str, score: float) -> dict | None:
+    """Процентиль (доля планов не лучше данного) и позиция в топ-100, если есть."""
+    if not index:
+        return None
+    q = index["quantiles"]
+    pos = bisect.bisect_right(q, score)
+    percentile = 100.0 * pos / len(q)
+    position = next((t["rank"] for t in index["top"] if t["scenario_key"] == scenario_key_), None)
+    return {"percentile": percentile, "total": index["total"], "top_position": position,
+            "best_score": index["score_max"], "gap_to_best": index["score_max"] - score}
+```
+
+- [ ] **Шаг 2. `scripts/rank_all.py`**
+
+```python
+# scripts/rank_all.py
+"""Считает индекс всех допустимых наборов и сохраняет data/top_sets.json. Запуск: python scripts/rank_all.py (около 30 секунд)."""
+import sys
+import time
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from engine.model import load_city  # noqa: E402
+from engine.ranking import build_index, save_index, INDEX_PATH  # noqa: E402
+
+if __name__ == "__main__":
+    t = time.time()
+    city = load_city()
+    index = build_index(city)
+    save_index(index, INDEX_PATH)
+    print(f"наборов: {index['total']}, лучший: {index['score_max']:.5f}, худший: {index['score_min']:.5f}, "
+          f"топ-1: {index['top'][0]['scenario_key']}, {time.time() - t:.1f} с, файл {INDEX_PATH}")
+```
+
+- [ ] **Шаг 3. Построить индекс**
+
+Команда: `python scripts/rank_all.py`
+Ожидание: `наборов: 694395, лучший: 57.23673, худший: 52.04092, топ-1: M2|M3:nura|M8:nura|M9:nura|M14`, около 25 секунд, файл `data/top_sets.json` около 50 КБ. Файл коммитится в репозиторий, чтобы эксперту не нужно было ждать перебор.
+
+- [ ] **Шаг 4. `engine/templates.py`**
+
+```python
+# engine/templates.py
+"""Банк ответов советника без модели: тексты собираются из фактов, глобального топа и правил.
+Возвращает ту же структуру, что и живое объяснение, плюс поле comparison."""
+from __future__ import annotations
+from .model import City
+
+DISTRICT_LOC = {"esil": "в Есиле", "almaty": "в районе Алматы", "saryarka": "в Сарыарке", "baikonur": "в Байконуре", "nura": "в Нуре"}
+DISTRICT_GEN = {"esil": "Есиля", "almaty": "Алматы", "saryarka": "Сарыарки", "baikonur": "Байконура", "nura": "Нуры"}
+
+
+def plural(n: float, one: str, few: str, many: str) -> str:
+    n = abs(int(round(n)))
+    if 11 <= n % 100 <= 19:
+        return many
+    r = n % 10
+    return one if r == 1 else few if 2 <= r <= 4 else many
+
+
+def fmt(x: float, n: int = 2) -> str:
+    return f"{x:.{n}f}".replace(".", ",")
+
+
+def sgn(x: float, n: int = 2) -> str:
+    return ("+" if x >= 0 else "−") + fmt(abs(x), n)
+
+
+def measure_phrase(city: City, d: dict) -> str:
+    m = city.measures[d["measure_id"]]
+    where = DISTRICT_LOC.get(d.get("district_id") or "", "по всему городу")
+    return f"{m.id} «{m.name}» {where}"
+
+
+def _facts_by(facts: list, kind: str) -> list:
+    return [f for f in facts if f["kind"] == kind]
+
+
+def _ids(*facts) -> list:
+    return [f["id"] for f in facts if f]
+
+
+def template_explanation(city: City, result: dict, candidates: list, facts: list, index: dict | None, rank: dict | None) -> dict:
+    score_f = _facts_by(facts, "score")[0]
+    dec_f = _facts_by(facts, "decomposition")[0]
+    worst_f = _facts_by(facts, "worst_district")[0]
+    delta = result["delta"]
+    dc = result["decomposition"]
+    worst = min(result["district_results"], key=lambda d: d["score_after"])
+
+    # Резюме
+    if delta < 0:
+        opener = f"План ухудшает город: Score {fmt(result['score'])} против базы {fmt(result['baseline_score'])}, {sgn(delta)}."
+    elif delta < 1:
+        opener = f"План почти не меняет картину: Score {fmt(result['score'])}, {sgn(delta)} к базе {fmt(result['baseline_score'])}."
+    elif delta < 3:
+        opener = f"План умеренно улучшает город: Score {fmt(result['score'])}, {sgn(delta)} к базе {fmt(result['baseline_score'])}."
+    else:
+        opener = f"План заметно улучшает город: Score {fmt(result['score'])}, {sgn(delta)} к базе {fmt(result['baseline_score'])}."
+    parts = [opener]
+    if rank:
+        if rank["top_position"]:
+            parts.append(f"Это {rank['top_position']}-е место среди всех {rank['total']} допустимых планов.")
+        elif rank["percentile"] >= 99.95:
+            parts.append(f"Он входит в лучшие 0,1% из {rank['total']} допустимых планов.")
+        else:
+            parts.append(f"Он лучше {fmt(rank['percentile'], 1)}% из {rank['total']} допустимых планов.")
+    parts.append(f"Слабейший район после решений {worst['name']}: {fmt(worst['score_after'])} (было {fmt(worst['score_before'])}).")
+    summary = " ".join(parts)
+
+    # Сильные стороны
+    strengths = []
+    if dc["avg"] > 1e-9:
+        strengths.append({"text": f"Средний результат города вырос: вклад в Score {sgn(dc['avg'])}.", "fact_ids": _ids(dec_f)})
+    if dc["min"] > 1e-9:
+        strengths.append({"text": f"Слабейший район подтянут: вклад в Score {sgn(dc['min'])}.", "fact_ids": _ids(dec_f)})
+    if dc["crit"] > 1e-9:
+        n = int(round(dc["crit"]))
+        strengths.append({"text": f"Снято {n} {plural(n, 'критический показатель', 'критических показателя', 'критических показателей')}, штраф уменьшен на {n} {plural(n, 'балл', 'балла', 'баллов')}.",
+                          "fact_ids": _ids(dec_f, *_facts_by(facts, "no_critical"))})
+    for f in _facts_by(facts, "synergy"):
+        s = f["data"]
+        strengths.append({"text": f"Сработала синергия {s['pair']}: {s['indicator']} +{s['bonus']} {DISTRICT_LOC.get(s['district_id'], '')} без задержки.", "fact_ids": _ids(f)})
+    grown = sorted(_facts_by(facts, "district"), key=lambda f: -f["data"]["gain"])[:2]
+    for f in grown:
+        d = f["data"]
+        if d["gain"] > 1e-9:
+            name = city.district(d["district_id"]).name
+            strengths.append({"text": f"{name}: оценка района {fmt(d['score_before'])} → {fmt(d['score_after'])}.", "fact_ids": _ids(f)})
+    if not strengths:
+        strengths.append({"text": "Заметных сильных сторон у плана нет: ни одно слагаемое Score не выросло.", "fact_ids": _ids(dec_f)})
+
+    # Риски
+    risks = []
+    for f in _facts_by(facts, "critical"):
+        n = f["data"]["count"]
+        risks.append({"text": f"Остались {n} {plural(n, 'критический показатель', 'критических показателя', 'критических показателей')} ниже 40, каждый отнимает балл: " +
+                      ", ".join(f"{p['indicator']} {DISTRICT_LOC.get(p['district_id'], '')} {fmt(p['value'], 1)}" for p in f["data"]["pairs"]) + ".", "fact_ids": _ids(f)})
+    for f in _facts_by(facts, "measure"):
+        d = f["data"]
+        neg = [e for e in d["effects"] if e["delta"] < 0]
+        if neg:
+            m = city.measures[d["measure_id"]]
+            risks.append({"text": f"{m.id} «{m.name}» имеет побочный эффект: " + ", ".join(f"{e['code']} {sgn(e['delta'], 1)} {DISTRICT_LOC.get(e['district_id'], '')}" for e in neg) + ".", "fact_ids": _ids(f)})
+    for f in _facts_by(facts, "district_unchanged"):
+        risks.append({"text": f"{city.district(f['data']['district_id']).name} остаётся без внимания: ни одна мера его не касается.", "fact_ids": _ids(f)})
+    slow = [f for f in _facts_by(facts, "measure") if f["data"]["realized_fraction"] <= 0.5]
+    for f in slow:
+        m = city.measures[f["data"]["measure_id"]]
+        pct = int(round(f["data"]["realized_fraction"] * 100))
+        risks.append({"text": f"{m.id} «{m.name}» заработает только через {m.lag} {plural(m.lag, 'квартал', 'квартала', 'кварталов')}: за горизонт реализуется {pct}% эффекта.", "fact_ids": _ids(f)})
+    chosen = {d["measure_id"] for d in result["decisions"]}
+    for s in city.synergies:
+        a, b = s["pair"]
+        if (a in chosen) != (b in chosen):
+            have, miss = (a, b) if a in chosen else (b, a)
+            risks.append({"text": f"Упущена синергия {a}+{b}: выбрана {have}, без {miss} бонус {s['indicator']} +{s['bonus']} не сработает.", "fact_ids": _ids(_facts_by(facts, "plan")[0])})
+    if result["remaining_budget"] >= 10:
+        risks.append({"text": f"Не потрачено {result['remaining_budget']} {plural(result['remaining_budget'], 'единица', 'единицы', 'единиц')} бюджета, остаток не даёт бонуса: возможно, одну меру стоит заменить на более сильную.", "fact_ids": _ids(_facts_by(facts, "plan")[0])})
+    if not risks:
+        risks.append({"text": f"{worst['name']} остаётся слабейшим районом ({fmt(worst['score_after'])}), его показатели ограничивают итог.", "fact_ids": _ids(worst_f)})
+    risks = risks[:5]
+
+    # Предложения: сначала проверенные альтернативы, потом сравнение с глобальным лучшим
+    suggestions = []
+    for f in _facts_by(facts, "candidate"):
+        c = next(x for x in candidates if x["id"] == f["data"]["candidate_id"])
+        suggestions.append({"candidate_id": c["id"],
+                            "text": f"Заменить {measure_phrase(city, c['replace'])} на {measure_phrase(city, c['with'])}: Score {fmt(c['score'])}, {sgn(c['delta'])}, стоимость {c['cost']}.",
+                            "fact_ids": _ids(f)})
+
+    comparison = None
+    if index and index.get("top"):
+        best = index["top"][0]
+        if best["scenario_key"] == result["scenario_key"]:
+            comparison = f"Это лучший из {index['total']} допустимых планов, выше {fmt(best['score'])} по этой модели подняться нельзя."
+        else:
+            mine = {(d["measure_id"], d.get("district_id")) for d in result["decisions"]}
+            theirs = {(d["measure_id"], d.get("district_id")) for d in best["decisions"]}
+            remove = [d for d in result["decisions"] if (d["measure_id"], d.get("district_id")) not in theirs]
+            add = [d for d in best["decisions"] if (d["measure_id"], d.get("district_id")) not in mine]
+            comparison = (f"Лучший план даёт {fmt(best['score'])} при стоимости {best['cost']}, у вас {fmt(result['score'])}, разница {fmt(best['score'] - result['score'])}. "
+                          f"Чтобы прийти к нему: убрать " + ", ".join(measure_phrase(city, d) for d in remove) +
+                          "; добавить " + ", ".join(measure_phrase(city, d) for d in add) + ".")
+    return {"summary": summary, "strengths": strengths[:5], "risks": risks, "suggestions": suggestions, "comparison": comparison}
+```
+
+- [ ] **Шаг 5. `engine/explain.py` заменить целиком**
+
+```python
+# engine/explain.py
+from __future__ import annotations
+import hashlib
+import json
+import os
+import re
+from collections import OrderedDict
+from .model import City
+from .facts import fallback_explanation
+from .templates import template_explanation
+
+PROMPT_VERSION = "akim-explain-v2"
+MAX_CACHE = 100
+_cache: "OrderedDict[str, dict]" = OrderedDict()
+
+NUM_RE = re.compile(r"(?<![A-Za-zА-Яа-я\d_])-?\d+(?:[.,]\d+)?")
+
+SYSTEM_PROMPT = (
+    "Ты советник акима Астаны в учебном симуляторе городского бюджета. "
+    "Тебе дан список фактов с идентификаторами f1..fN, каждый факт уже посчитан программой. "
+    "Объясни результат человеческим языком: короткое резюме, 2–3 сильные стороны, 2–3 риска или компромисса, "
+    "и по одному комментарию к каждой альтернативе c1..c3, если они переданы. "
+    "Называй меры по названию, а не только по коду, и привязывай каждый риск к конкретному району или показателю. "
+    "Правила: не придумывай числа, меры и районы; используй только числа из фактов и только в том виде, как они там записаны; "
+    "каждое утверждение опирается на факты и перечисляет их идентификаторы в fact_ids; "
+    "в suggestions используй только переданные candidate_id; пиши по-русски, коротко, без общих фраз. "
+    "Ответ строго JSON без других ключей: {\"summary\": str, \"strengths\": [{\"text\": str, \"fact_ids\": [str]}], "
+    "\"risks\": [{\"text\": str, \"fact_ids\": [str]}], \"suggestions\": [{\"candidate_id\": str, \"text\": str, \"fact_ids\": [str]}]}"
+)
+
+CHAT_PROMPT = (
+    "Ты советник акима Астаны в учебном симуляторе городского бюджета. Отвечай на вопросы пользователя о его плане. "
+    "Ниже факты о текущем плане, они посчитаны программой, и список лучших планов из полного перебора. "
+    "Правила: опирайся только на эти факты; не придумывай числа, меры и районы; если ответа в фактах нет, скажи об этом; "
+    "советы давай конкретные: какую меру на какую заменить и что это даст, ссылаясь на альтернативы или лучшие планы. "
+    "Отвечай по-русски, коротко, до 120 слов, обычным текстом без JSON."
+)
+
+
+class NotConfigured(Exception):
+    pass
+
+
+def clear_cache() -> None:
+    _cache.clear()
+
+
+def server_key() -> str:
+    return os.environ.get("OPENAI_API_KEY", "").strip()
+
+
+def resolve_key(user_key: str | None) -> str:
+    """Ключ из запроса имеет приоритет над серверным."""
+    return (user_key or "").strip() or server_key()
+
+
+def model_name() -> str:
+    return os.environ.get("OPENAI_MODEL", "gpt-4o-mini").strip() or "gpt-4o-mini"
+
+
+def _client(key: str):
+    from openai import OpenAI
+    timeout = float(os.environ.get("LLM_TIMEOUT_S", "15") or 15)
+    return OpenAI(api_key=key, timeout=timeout, max_retries=0)
+
+
+def call_openai(facts: list, candidates: list, key: str) -> tuple:
+    """Реальный вызов OpenAI для структурированного объяснения. Возвращает (текст ответа, имя модели)."""
+    payload = {"facts": [{"id": f["id"], "kind": f["kind"], "text": f["text"]} for f in facts],
+               "candidate_ids": [c["id"] for c in candidates]}
+    resp = _client(key).chat.completions.create(
+        model=model_name(), temperature=0.3, response_format={"type": "json_object"},
+        messages=[{"role": "system", "content": SYSTEM_PROMPT},
+                  {"role": "user", "content": json.dumps(payload, ensure_ascii=False)}],
+    )
+    return resp.choices[0].message.content, model_name()
+
+
+def call_openai_chat(system: str, messages: list, key: str) -> tuple:
+    resp = _client(key).chat.completions.create(
+        model=model_name(), temperature=0.4,
+        messages=[{"role": "system", "content": system}] + messages,
+    )
+    return resp.choices[0].message.content, model_name()
+
+
+def check_key(key: str) -> dict:
+    """Минимальный запрос, чтобы проверить ключ. Ключ не сохраняется и не логируется."""
+    if not key:
+        return {"ok": False, "error": "Ключ не передан"}
+    try:
+        _client(key).models.retrieve(model_name())
+        return {"ok": True, "model": model_name()}
+    except Exception as e:
+        return {"ok": False, "error": type(e).__name__}
+
+
+def _allowed_numbers(facts: list, extra: list | None = None) -> set:
+    vals = set(extra or [])
+
+    def walk(x):
+        if isinstance(x, bool):
+            return
+        if isinstance(x, (int, float)):
+            vals.add(float(x))
+        elif isinstance(x, dict):
+            for v in x.values():
+                walk(v)
+        elif isinstance(x, list):
+            for v in x:
+                walk(v)
+    for f in facts:
+        walk(f.get("data", {}))
+        for s in NUM_RE.findall(f["text"]):
+            vals.add(float(s.replace(",", ".")))
+    return vals
+
+
+def _numbers_ok(text: str, allowed: set) -> bool:
+    for s in NUM_RE.findall(text):
+        v = float(s.replace(",", "."))
+        if v.is_integer() and 0 <= v <= 14:
+            continue
+        if any(abs(v - a) <= 0.051 for a in allowed):
+            continue
+        return False
+    return True
+
+
+def _statement(item, fact_ids: set, allowed: set) -> dict:
+    if not isinstance(item, dict) or set(item) - {"text", "fact_ids", "candidate_id"}:
+        raise ValueError("bad statement shape")
+    text = item.get("text")
+    ids = item.get("fact_ids")
+    if not isinstance(text, str) or not text.strip() or len(text) > 600:
+        raise ValueError("bad text")
+    if not isinstance(ids, list) or not ids or not all(isinstance(i, str) for i in ids) or not set(ids) <= fact_ids:
+        raise ValueError("unknown fact id")
+    if not _numbers_ok(text, allowed):
+        raise ValueError("invented number")
+    return {"text": text.strip(), "fact_ids": ids}
+
+
+def validate_answer(text: str, facts: list, candidates: list) -> dict:
+    data = json.loads(text)
+    if not isinstance(data, dict) or set(data) != {"summary", "strengths", "risks", "suggestions"}:
+        raise ValueError("bad top-level shape")
+    fact_ids = {f["id"] for f in facts}
+    cand_ids = {c["id"] for c in candidates}
+    allowed = _allowed_numbers(facts)
+    summary = data["summary"]
+    if not isinstance(summary, str) or not summary.strip() or len(summary) > 800 or not _numbers_ok(summary, allowed):
+        raise ValueError("bad summary")
+    out = {"summary": summary.strip(), "strengths": [], "risks": [], "suggestions": []}
+    for key in ("strengths", "risks"):
+        items = data[key]
+        if not isinstance(items, list) or not items or len(items) > 5:
+            raise ValueError(f"bad {key}")
+        for it in items:
+            st = _statement(it, fact_ids, allowed)
+            if "candidate_id" in it:
+                raise ValueError("candidate_id outside suggestions")
+            out[key].append(st)
+    sugg = data["suggestions"]
+    if not isinstance(sugg, list) or len(sugg) > 3:
+        raise ValueError("bad suggestions")
+    used = set()
+    for it in sugg:
+        st = _statement(it, fact_ids, allowed)
+        cid = it.get("candidate_id")
+        if cid not in cand_ids or cid in used:
+            raise ValueError("unknown or repeated candidate id")
+        used.add(cid)
+        out["suggestions"].append({"candidate_id": cid, **st})
+    return out
+
+
+def _key_tag(key: str) -> str:
+    return hashlib.sha256(key.encode()).hexdigest()[:8] if key else "server"
+
+
+def explain(city: City, result: dict, candidates: list, facts: list, call_model=None,
+            user_key: str | None = None, index: dict | None = None, rank: dict | None = None) -> dict:
+    """Живое объяснение с ключом (из запроса или сервера), иначе банк ответов из шаблонов.
+    call_model(facts, candidates, key) -> (text, model) подменяется в тестах."""
+    call = call_model or call_openai
+    key = resolve_key(user_key)
+    tag = _key_tag((user_key or "").strip())
+    cache_key = f"{city.version}|{PROMPT_VERSION}|{model_name()}|{tag}|{result['scenario_key']}"
+    if cache_key in _cache:
+        return _cache[cache_key]
+    template = template_explanation(city, result, candidates, facts, index, rank)
+    base = {"scenario_key": result["scenario_key"], "facts": facts, "rank": rank, "comparison": template["comparison"],
+            "key_source": "user" if (user_key or "").strip() else ("server" if server_key() else None)}
+    try:
+        if not key:
+            raise NotConfigured()
+        text, model = call(facts, candidates, key)
+        out = {**base, "mode": "live", "model": model, "reason": None, "explanation": validate_answer(text, facts, candidates)}
+        _cache[cache_key] = out
+        while len(_cache) > MAX_CACHE:
+            _cache.popitem(last=False)
+        return out
+    except NotConfigured:
+        reason = "not_configured"
+    except Exception as e:  # таймаут, сеть, сломанный JSON, неверная схема, выдуманные числа
+        reason = type(e).__name__
+    return {**base, "mode": "template", "model": None, "reason": reason,
+            "explanation": {k: template[k] for k in ("summary", "strengths", "risks", "suggestions")}}
+
+
+def chat(city: City, result: dict, candidates: list, facts: list, index: dict | None, rank: dict | None,
+         messages: list, user_key: str | None = None, call_model=None) -> dict:
+    """Диалог с советником. Без ключа возвращает mode=unavailable. Числа в ответе проверяются по фактам."""
+    key = resolve_key(user_key)
+    if not key:
+        return {"mode": "unavailable", "reply": "Диалог с советником доступен только с ключом OpenAI: серверным или введённым в интерфейсе.", "verified": False, "model": None}
+    template = template_explanation(city, result, candidates, facts, index, rank)
+    top_lines = []
+    if index:
+        for t in index["top"][:5]:
+            top_lines.append(f"{t['rank']}. Score {t['score']:.2f}, стоимость {t['cost']}: " +
+                             "; ".join(f"{d['measure_id']} " + (city.district(d['district_id']).name if d.get('district_id') else "город") for d in t["decisions"]))
+    system = (CHAT_PROMPT + "\n\nФакты о текущем плане:\n" + "\n".join(f"{f['id']}: {f['text']}" for f in facts) +
+              "\n\nСравнение с лучшим планом: " + (template["comparison"] or "нет данных") +
+              "\n\nЛучшие планы из полного перебора:\n" + ("\n".join(top_lines) or "нет данных"))
+    trimmed = [{"role": m["role"], "content": str(m["content"])[:2000]} for m in messages[-10:] if m.get("role") in ("user", "assistant")]
+    if not trimmed or trimmed[-1]["role"] != "user":
+        return {"mode": "error", "reply": "Последнее сообщение должно быть от пользователя.", "verified": False, "model": None}
+    call = call_model or call_openai_chat
+    try:
+        text, model = call(system, trimmed, key)
+    except Exception as e:
+        return {"mode": "error", "reply": f"Модель недоступна: {type(e).__name__}. Расчёт и шаблонное объяснение работают.", "verified": False, "model": None}
+    extra = [t["score"] for t in index["top"][:5]] + [index["total"], index["score_max"]] if index else []
+    verified = _numbers_ok(text, _allowed_numbers(facts, extra))
+    return {"mode": "live", "reply": text.strip(), "verified": verified, "model": model}
+```
+
+- [ ] **Шаг 6. В `tests/test_explain.py` и `tests/test_api.py` заменить все `"fallback"` на `"template"`.**
+
+Команда (Git Bash): `sed -i 's/"fallback"/"template"/g' tests/test_explain.py tests/test_api.py`
+
+- [ ] **Шаг 7. Запустить**: `pytest -q`, ожидание: все тесты проходят. `test_api.py` пока работает со старым `app.py`, это нормально: старые маршруты не менялись.
+- [ ] **Шаг 8. Коммит по разрешению.** `feat: полный перебор планов, глобальный топ, банк ответов советника`. Файлы: `engine/ranking.py scripts/rank_all.py engine/templates.py engine/explain.py data/top_sets.json tests/test_explain.py tests/test_api.py`
+
+### Задача 12. Ключ из интерфейса, топ, ранг и диалог в API
+
+**Файлы:** заменить целиком `app.py`; создать `tests/test_bank.py`.
+
+- [ ] **Шаг 1. `tests/test_bank.py`**
+
+```python
+# tests/test_bank.py
+import json
+import pytest
+from fastapi.testclient import TestClient
+from engine.model import load_city
+from engine.scoring import evaluate
+from engine.advisor import find_improvements
+from engine.facts import build_facts
+from engine.ranking import load_index, rank_info, enumerate_valid, INDEX_PATH
+from engine.templates import template_explanation, plural
+from engine import explain as ex
+from app import create_app
+
+CITY = load_city()
+EX = [dict(d) for d in CITY.example_scenario]
+INDEX = load_index()
+BODY = {"decisions": EX}
+
+
+def _prep():
+    r = evaluate(CITY, EX)
+    c = find_improvements(CITY, EX)
+    return r, c, build_facts(CITY, r, c)
+
+
+def test_plural():
+    assert plural(1, "балл", "балла", "баллов") == "балл"
+    assert plural(3, "балл", "балла", "баллов") == "балла"
+    assert plural(11, "балл", "балла", "баллов") == "баллов"
+    assert plural(22, "балл", "балла", "баллов") == "балла"
+
+
+def test_index_exists_and_consistent():
+    assert INDEX_PATH.exists(), "запустите python scripts/rank_all.py"
+    assert INDEX["dataset_version"] == CITY.version
+    assert INDEX["total"] > 100000 and len(INDEX["top"]) == 100
+    top1 = INDEX["top"][0]
+    assert evaluate(CITY, top1["decisions"])["score"] == pytest.approx(top1["score"], abs=1e-9)
+    assert INDEX["top"][0]["score"] >= INDEX["top"][-1]["score"]
+    # первые 200 наборов перебора валидны по общему валидатору
+    from engine.validator import validate
+    for i, dec in zip(range(200), enumerate_valid(CITY)):
+        assert validate(CITY, dec) == []
+
+
+def test_rank_info_example():
+    r = evaluate(CITY, EX)
+    info = rank_info(INDEX, r["scenario_key"], r["score"])
+    assert 0 < info["percentile"] <= 100 and info["total"] == INDEX["total"]
+    assert info["gap_to_best"] == pytest.approx(INDEX["score_max"] - r["score"], abs=1e-9)
+    best = INDEX["top"][0]
+    assert rank_info(INDEX, best["scenario_key"], best["score"])["top_position"] == 1
+    assert rank_info(None, "x", 1.0) is None
+
+
+def test_template_explanation_example():
+    r, c, f = _prep()
+    rank = rank_info(INDEX, r["scenario_key"], r["score"])
+    t = template_explanation(CITY, r, c, f, INDEX, rank)
+    assert "56,54" in t["summary"] and "допустимых планов" in t["summary"]
+    assert t["strengths"] and t["risks"] and len(t["suggestions"]) == len(c)
+    assert t["comparison"] and "57,24" in t["comparison"] and "убрать" in t["comparison"]
+    ids = {x["id"] for x in f}
+    for key in ("strengths", "risks", "suggestions"):
+        for it in t[key]:
+            assert it["fact_ids"] and set(it["fact_ids"]) <= ids
+    # риск про упущенную синергию: M10 выбран без... нет, здесь M10+M12 оба; проверим негативный набор
+    s = [{"measure_id": "M10", "district_id": "nura"}, {"measure_id": "M7", "district_id": "nura"},
+         {"measure_id": "M14"}, {"measure_id": "M4", "district_id": "esil"}, {"measure_id": "M11", "district_id": "esil"}]
+    r2 = evaluate(CITY, s); c2 = find_improvements(CITY, s); f2 = build_facts(CITY, r2, c2)
+    t2 = template_explanation(CITY, r2, c2, f2, INDEX, None)
+    texts = " ".join(x["text"] for x in t2["risks"])
+    assert "Упущена синергия M10+M12" in texts and "M11" in texts
+
+
+def test_explain_without_key_uses_template(monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    ex.clear_cache()
+    r, c, f = _prep()
+    out = ex.explain(CITY, r, c, f, index=INDEX, rank=rank_info(INDEX, r["scenario_key"], r["score"]))
+    assert out["mode"] == "template" and out["reason"] == "not_configured" and out["key_source"] is None
+    assert out["comparison"] and out["rank"]["total"] == INDEX["total"]
+
+
+def test_user_key_has_priority_and_separate_cache(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "server-key")
+    seen = []
+    r, c, f = _prep()
+    good = json.dumps({"summary": "ок", "strengths": [{"text": "s", "fact_ids": ["f1"]}],
+                       "risks": [{"text": "r", "fact_ids": ["f2"]}], "suggestions": []})
+
+    def fake(facts, cands, key):
+        seen.append(key)
+        return good, "m"
+    ex.clear_cache()
+    a = ex.explain(CITY, r, c, f, call_model=fake)
+    b = ex.explain(CITY, r, c, f, call_model=fake, user_key="user-key")
+    assert seen == ["server-key", "user-key"] and a["key_source"] == "server" and b["key_source"] == "user"
+
+
+def test_chat_modes(monkeypatch):
+    r, c, f = _prep()
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    out = ex.chat(CITY, r, c, f, INDEX, None, [{"role": "user", "content": "что улучшить?"}])
+    assert out["mode"] == "unavailable"
+    monkeypatch.setenv("OPENAI_API_KEY", "k")
+    ok = ex.chat(CITY, r, c, f, INDEX, None, [{"role": "user", "content": "что улучшить?"}],
+                 call_model=lambda system, msgs, key: ("Замените M5 на M3 в Нуре, Score 57,21.", "m"))
+    assert ok["mode"] == "live" and ok["verified"] is True
+    bad = ex.chat(CITY, r, c, f, INDEX, None, [{"role": "user", "content": "?"}],
+                  call_model=lambda system, msgs, key: ("Score станет 99,9", "m"))
+    assert bad["mode"] == "live" and bad["verified"] is False
+    err = ex.chat(CITY, r, c, f, INDEX, None, [{"role": "user", "content": "?"}],
+                  call_model=lambda *a: (_ for _ in ()).throw(TimeoutError()))
+    assert err["mode"] == "error"
+
+
+def test_api_top_rank_chat_and_key_header(monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    ex.clear_cache()
+    calls = []
+
+    def fake_chat(system, msgs, key):
+        calls.append(key)
+        return "Ответ советника без чисел.", "m"
+    client = TestClient(create_app(chat_model=fake_chat))
+    h = client.get("/api/health").json()
+    assert h["ranking_available"] is True and h["total_plans"] == INDEX["total"]
+    t = client.get("/api/top?limit=3").json()
+    assert len(t["top"]) == 3 and t["top"][0]["rank"] == 1
+    e = client.post("/api/evaluate", json=BODY).json()
+    assert e["rank"]["total"] == INDEX["total"] and 0 < e["rank"]["percentile"] <= 100
+    x = client.post("/api/explain", json=BODY).json()
+    assert x["mode"] == "template" and x["comparison"] and x["rank"]
+    ch = client.post("/api/chat", json={**BODY, "messages": [{"role": "user", "content": "привет"}]}).json()
+    assert ch["mode"] == "unavailable"
+    ch = client.post("/api/chat", json={**BODY, "messages": [{"role": "user", "content": "привет"}]},
+                     headers={"X-OpenAI-Key": "user-key"}).json()
+    assert ch["mode"] == "live" and ch["verified"] is True and calls == ["user-key"]
+    assert client.post("/api/chat", json={**BODY, "messages": [{"role": "user", "content": "x", "extra": 1}]}).status_code == 422
+```
+
+- [ ] **Шаг 2. Запустить**: `pytest tests/test_bank.py -q`, ожидание: падения на отсутствующих маршрутах.
+
+- [ ] **Шаг 3. `app.py` заменить целиком**
+
+```python
+# app.py
+from __future__ import annotations
+from pathlib import Path
+from typing import Optional
+from dotenv import load_dotenv
+from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, ConfigDict, Field
+from starlette.middleware.base import BaseHTTPMiddleware
+
+from engine.model import load_city
+from engine.scoring import evaluate, baseline
+from engine.advisor import find_improvements
+from engine.facts import build_facts
+from engine.explain import explain, chat, check_key, server_key, resolve_key
+from engine.ranking import load_index, rank_info
+
+load_dotenv(Path(__file__).resolve().parent / ".env")
+MAX_BODY = 16 * 1024
+STATIC = Path(__file__).resolve().parent / "static"
+
+
+class Decision(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    measure_id: str = Field(max_length=8)
+    district_id: Optional[str] = Field(default=None, max_length=32)
+
+
+class ScenarioIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    decisions: list[Decision] = Field(max_length=10)
+
+
+class ChatMessage(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    role: str = Field(max_length=16)
+    content: str = Field(max_length=2000)
+
+
+class ChatIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    decisions: list[Decision] = Field(max_length=10)
+    messages: list[ChatMessage] = Field(max_length=20)
+
+
+class BodyLimitMiddleware(BaseHTTPMiddleware):
+    """Читает тело POST целиком и отвечает 413, если фактически получено больше MAX_BODY байт."""
+
+    async def dispatch(self, request: Request, call_next):
+        if request.method == "POST":
+            body = await request.body()
+            if len(body) > MAX_BODY:
+                return JSONResponse({"detail": "body too large"}, status_code=413)
+        return await call_next(request)
+
+
+def create_app(call_model=None, chat_model=None, index_path=None) -> FastAPI:
+    city = load_city()
+    index = load_index(index_path) if index_path else load_index()
+    if index and index.get("dataset_version") != city.version:
+        index = None
+    app = FastAPI(title="Аким на 5 часов", version="1.1")
+    app.add_middleware(BodyLimitMiddleware)
+
+    def to_decisions(s) -> list:
+        return [{"measure_id": d.measure_id, **({"district_id": d.district_id} if d.district_id else {})} for d in s.decisions]
+
+    def with_rank(r: dict) -> dict:
+        r["rank"] = rank_info(index, r["scenario_key"], r["score"]) if r["valid"] else None
+        return r
+
+    def valid_or_422(s):
+        d = to_decisions(s)
+        r = with_rank(evaluate(city, d))
+        if not r["valid"]:
+            raise HTTPException(status_code=422, detail={"errors": r["errors"]})
+        return d, r
+
+    @app.get("/api/health")
+    def health():
+        return {"status": "ok", "dataset_version": city.version, "ai_configured": bool(server_key()),
+                "ranking_available": index is not None, "total_plans": index["total"] if index else None}
+
+    @app.get("/api/city")
+    def city_data():
+        return {**city.raw, "baseline": baseline(city)}
+
+    @app.get("/api/top")
+    def top(limit: int = 5):
+        if not index:
+            return {"total": None, "top": []}
+        return {"total": index["total"], "score_max": index["score_max"], "top": index["top"][:max(1, min(limit, 100))]}
+
+    @app.post("/api/evaluate")
+    def api_evaluate(s: ScenarioIn):
+        return with_rank(evaluate(city, to_decisions(s)))
+
+    @app.post("/api/improvements")
+    def api_improvements(s: ScenarioIn):
+        d, r = valid_or_422(s)
+        return {"scenario_key": r["scenario_key"], "candidates": find_improvements(city, d)}
+
+    @app.post("/api/explain")
+    def api_explain(s: ScenarioIn, x_openai_key: Optional[str] = Header(default=None, alias="X-OpenAI-Key")):
+        d, r = valid_or_422(s)
+        cands = find_improvements(city, d)
+        facts = build_facts(city, r, cands)
+        out = explain(city, r, cands, facts, call_model=call_model, user_key=x_openai_key, index=index, rank=r["rank"])
+        return {**out, "candidates": cands}
+
+    @app.post("/api/chat")
+    def api_chat(s: ChatIn, x_openai_key: Optional[str] = Header(default=None, alias="X-OpenAI-Key")):
+        d, r = valid_or_422(s)
+        cands = find_improvements(city, d)
+        facts = build_facts(city, r, cands)
+        msgs = [{"role": m.role, "content": m.content} for m in s.messages]
+        return chat(city, r, cands, facts, index, r["rank"], msgs, user_key=x_openai_key, call_model=chat_model)
+
+    @app.post("/api/ai/check")
+    def api_ai_check(x_openai_key: Optional[str] = Header(default=None, alias="X-OpenAI-Key")):
+        key = resolve_key(x_openai_key)
+        out = check_key(key)
+        out["key_source"] = "user" if (x_openai_key or "").strip() else ("server" if server_key() else None)
+        return out
+
+    if (STATIC / "index.html").exists():
+        app.mount("/", StaticFiles(directory=str(STATIC), html=True), name="static")
+    return app
+
+
+app = create_app()
+```
+
+- [ ] **Шаг 4. Запустить**: `pytest -q`, ожидание: все тесты проходят, 57 и больше.
+
+- [ ] **Шаг 5. Живая проверка с ключом из `.env`**
+
+Команда: `python -m uvicorn app:app --port 8000`, затем в другом терминале (Git Bash):
+
+```
+curl -s localhost:8000/api/health
+curl -s "localhost:8000/api/top?limit=3"
+curl -s -X POST localhost:8000/api/ai/check
+curl -s -X POST localhost:8000/api/chat -H "Content-Type: application/json" -d '{"decisions":[{"measure_id":"M7","district_id":"nura"},{"measure_id":"M8","district_id":"nura"},{"measure_id":"M10","district_id":"nura"},{"measure_id":"M12"},{"measure_id":"M5","district_id":"saryarka"}],"messages":[{"role":"user","content":"Что поменять, чтобы обогнать лучший план?"}]}'
+```
+
+В PowerShell тело передаётся так: `-d "{\"decisions\":[{\"measure_id\":\"M7\",\"district_id\":\"nura\"},{\"measure_id\":\"M8\",\"district_id\":\"nura\"},{\"measure_id\":\"M10\",\"district_id\":\"nura\"},{\"measure_id\":\"M12\"},{\"measure_id\":\"M5\",\"district_id\":\"saryarka\"}],\"messages\":[{\"role\":\"user\",\"content\":\"Что поменять, чтобы обогнать лучший план?\"}]}"`.
+
+Ожидание: `ranking_available: true`, три плана в топе, `ok: true`, ответ советника с `mode: live` и `verified: true`.
+
+- [ ] **Шаг 6. README.** В таблицу соответствия добавить строки: «AI-рекомендации по улучшению» → `engine/advisor.py`, `engine/ranking.py`, `/api/improvements`, `/api/top`; «Сравнение результатов» → `rank` в `/api/evaluate`, `/api/top`. В раздел про переменные окружения добавить абзац: ключ можно ввести в интерфейсе, он передаётся заголовком `X-OpenAI-Key`, на сервере не сохраняется. В раздел про режимы: `live`, `template` (банк ответов из фактов и полного перебора), диалог доступен только с ключом, поле `verified`.
+
+- [ ] **Шаг 7. Коммит по разрешению.** `feat: ключ OpenAI из интерфейса, топ планов, ранг сценария, диалог с советником`
 
 ## Порядок отсечения при нехватке времени
 
