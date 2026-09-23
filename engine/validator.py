@@ -24,7 +24,7 @@ def validate(city: City, decisions: list) -> list:
             continue
         mid = d.get("measure_id")
         did = d.get("district_id") or None
-        m = city.measures.get(mid)
+        m = city.measures.get(mid) if isinstance(mid, str) else None
         if m is None:
             errors.append(_err("unknown_measure", f"Неизвестная мера {mid}", [mid] if mid else [], [i]))
             continue
@@ -42,7 +42,7 @@ def validate(city: City, decisions: list) -> list:
 
     positions = defaultdict(list)
     for i, d in enumerate(decisions):
-        if isinstance(d, dict) and d.get("measure_id") in city.measures:
+        if isinstance(d, dict) and isinstance(d.get("measure_id"), str) and d["measure_id"] in city.measures:
             positions[d["measure_id"]].append(i)
     for mid, idx in positions.items():
         if len(idx) > 1:
