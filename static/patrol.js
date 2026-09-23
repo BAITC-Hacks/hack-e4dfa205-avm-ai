@@ -52,7 +52,19 @@ const DRONE_EVENTS = [
   { d: 'esil', k: 'C1', t: 'Строительная площадка без разрешения по данным карты: ограждение, техника, котлован. Снимок с координатами сохранил.', s: 'передано в акимат', lvl: 'warn' },
   { d: 'baikonur', k: 'C1', t: 'Осмотрел опору теплотрассы: трещин и деформаций не вижу, конструкция устойчива. Снимок сохранён.', s: 'без замечаний', lvl: 'info' },
 ];
-const state = { pos: 0, t: 0, feed: [], idx: 0, open: false, timer: null, raf: null, counts: {}, unit: 'dog', dpos: 0, dt: 0, dfeed: [], didx: 0 };
+const FRAMES = {
+  dog: ['/static/img/patrol-cam.jpg', '/static/img/patrol-dog2.jpg', '/static/img/patrol-dog3.jpg', '/static/img/patrol-dog4.jpg', '/static/img/patrol-dog5.jpg'],
+  drone: ['/static/img/patrol-dronecam.jpg', '/static/img/patrol-drone2.jpg', '/static/img/patrol-drone3.jpg', '/static/img/patrol-drone4.jpg', '/static/img/patrol-drone5.jpg'],
+};
+function swapFrame() {
+  const img = document.querySelector('.patrol-cam img'); if (!img) return;
+  const list = FRAMES[state.unit] || FRAMES.dog;
+  state.frame = ((state.frame || 0) + 1) % list.length;
+  const box = document.querySelector('.patrol-box');
+  img.classList.add('patrol-cam--fade');
+  setTimeout(() => { img.src = list[state.frame]; img.onload = () => img.classList.remove('patrol-cam--fade'); if (box) box.style.display = state.frame === 0 ? '' : 'none'; }, 260);
+}
+const state = { pos: 0, t: 0, feed: [], idx: 0, frame: 0, open: false, timer: null, raf: null, counts: {}, unit: 'dog', dpos: 0, dt: 0, dfeed: [], didx: 0 };
 
 function ensureMarker() {
   let m = $('#patrol-marker');
@@ -106,6 +118,7 @@ function pushEvent() {
   if (feed.length > 8) feed.pop();
   if (e.lvl !== 'ok') state.counts[e.d] = (state.counts[e.d] || 0) + 1;
   renderFeed();
+  if (state.open) swapFrame();
 }
 
 function renderFeed() {
@@ -130,7 +143,7 @@ function weakestDistrict() {
 
 function openCamera(unit) {
   if (state.open) return;
-  state.open = true; state.unit = unit === 'drone' ? 'drone' : 'dog';
+  state.open = true; state.unit = unit === 'drone' ? 'drone' : 'dog'; state.frame = 0;
   const drone = state.unit === 'drone';
   const box = document.createElement('div');
   box.className = 'patrol-modal'; box.id = 'patrol-modal';

@@ -776,3 +776,6 @@ h1, h2, h3 { margin: 0; font-family: var(--font-display); letter-spacing: .1px; 
 .patrol-box--gas { border-color: #ff6a5b; border-style: dashed; background: rgba(255,106,91,.12); }
 .patrol-box--gas span { background: #ff6a5b; color: #fff; }
 .patrol-concept { padding: 6px 12px 10px; font-size: 11px; color: rgba(255,255,255,.45); }
+
+.patrol-cam img { transition: opacity .26s ease; }
+.patrol-cam img.patrol-cam--fade { opacity: 0; }
