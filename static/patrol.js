@@ -24,20 +24,20 @@ const KNAME = { C1: 'ЖКХ', B1: 'безопасность улиц', B2: 'до
    Это заранее заданный сценарий демонстрации: события никуда не отправляются, в ленте так и подписано. */
 const DEMO_NOTE = 'демонстрация: событие не отправляется';
 const EVENTS = [
-  { d: 'nura', k: 'C1', t: 'Открытый люк на проезжей части, крышка отсутствует', to: 'ЖКХ', lvl: 'warn' },
-  { d: 'almaty', k: 'B2', t: 'Яма на дороге глубиной более 10 см у пешеходного перехода', to: 'дорожная служба', lvl: 'warn' },
-  { d: 'saryarka', k: 'E2', t: 'Газоанализатор: превышение CO у частного сектора', to: 'экологический контроль', lvl: 'bad' },
-  { d: 'esil', k: 'B1', t: 'Скопление людей у здания акимата, около 40 человек', s: 'наблюдение по сценарию', lvl: 'info' },
-  { d: 'baikonur', k: 'B1', t: 'Ребёнок без сопровождения у стройплощадки', to: 'оператор', lvl: 'bad' },
-  { d: 'almaty', k: 'B1', t: 'Совпадение с ориентировкой по силуэту и одежде', to: 'дежурная часть', lvl: 'bad' },
-  { d: 'nura', k: 'B1', t: 'Неработающий фонарь на пешеходной дорожке', to: 'ЖКХ', lvl: 'warn' },
-  { d: 'saryarka', k: 'C1', t: 'Парение из теплотрассы, возможный порыв', to: 'теплосети', lvl: 'warn' },
-  { d: 'esil', k: 'B2', t: 'Автомобиль на велодорожке у набережной', s: 'зафиксировано в сценарии', lvl: 'info' },
-  { d: 'baikonur', k: 'C1', t: 'Переполненная контейнерная площадка', to: 'ЖКХ', lvl: 'info' },
-  { d: 'nura', k: 'E2', t: 'Дым от сжигания мусора в частном секторе', to: 'экологический контроль', lvl: 'warn' },
-  { d: 'almaty', k: 'B2', t: 'Ребёнок перебегает дорогу вне перехода у школы', to: 'оператор', lvl: 'warn' },
-  { d: 'nura', k: 'B1', t: 'Разбитое остекление остановки', to: 'ЖКХ', lvl: 'info' },
-  { d: 'saryarka', k: 'B1', t: 'Маршрут пройден, отклонений нет', s: 'демонстрационный патруль продолжается', lvl: 'ok' },
+  { d: 'nura', k: 'C1', t: 'Открытый люк на проезжей части, крышка отсутствует', to: 'ЖКХ', lvl: 'warn', f: 0 },
+  { d: 'almaty', k: 'B2', t: 'Яма на дороге глубиной более 10 см у пешеходного перехода', to: 'дорожная служба', lvl: 'warn', f: 1 },
+  { d: 'saryarka', k: 'E2', t: 'Газоанализатор: превышение CO у частного сектора', to: 'экологический контроль', lvl: 'bad', f: 2 },
+  { d: 'esil', k: 'B1', t: 'Скопление людей у здания акимата, около 40 человек', s: 'наблюдение по сценарию', lvl: 'info', f: 3 },
+  { d: 'baikonur', k: 'B1', t: 'Ребёнок без сопровождения у стройплощадки', to: 'оператор', lvl: 'bad', f: 4 },
+  { d: 'almaty', k: 'B1', t: 'Совпадение с ориентировкой по силуэту и одежде', to: 'дежурная часть', lvl: 'bad', f: 3 },
+  { d: 'nura', k: 'B1', t: 'Неработающий фонарь на пешеходной дорожке', to: 'ЖКХ', lvl: 'warn', f: 4 },
+  { d: 'saryarka', k: 'C1', t: 'Парение из теплотрассы, возможный порыв', to: 'теплосети', lvl: 'warn', f: 2 },
+  { d: 'esil', k: 'B2', t: 'Автомобиль на велодорожке у набережной', s: 'зафиксировано в сценарии', lvl: 'info', f: 1 },
+  { d: 'baikonur', k: 'C1', t: 'Переполненная контейнерная площадка', to: 'ЖКХ', lvl: 'info', f: 4 },
+  { d: 'nura', k: 'E2', t: 'Дым от сжигания мусора в частном секторе', to: 'экологический контроль', lvl: 'warn', f: 2 },
+  { d: 'almaty', k: 'B2', t: 'Ребёнок перебегает дорогу вне перехода у школы', to: 'оператор', lvl: 'warn', f: 1 },
+  { d: 'nura', k: 'B1', t: 'Разбитое остекление остановки', to: 'ЖКХ', lvl: 'info', f: 4 },
+  { d: 'saryarka', k: 'B1', t: 'Маршрут пройден, отклонений нет', s: 'демонстрационный патруль продолжается', lvl: 'ok', f: 0 },
 ];
 
 const DRONE_ROUTE = [
@@ -45,21 +45,21 @@ const DRONE_ROUTE = [
   [78, 78, 'almaty'], [90, 60, 'almaty'], [82, 42, 'nura'], [60, 24, 'esil'], [34, 30, 'esil'], [10, 50, 'saryarka'],
 ];
 const DRONE_EVENTS = [
-  { d: 'saryarka', k: 'E2', t: 'Газоанализатор: фиксирую превышение CH₄ у промзоны, ветер на жилой сектор. Прогноз: пик через 2 часа.', s: 'передано в экологическую службу', lvl: 'bad' },
-  { d: 'saryarka', k: 'E2', t: 'Вижу дым от котельной частного сектора, видимость снижена.', s: 'наблюдаю', lvl: 'warn' },
-  { d: 'almaty', k: 'B2', t: 'ДТП на перекрёстке, две полосы перекрыты. Объезд через соседние улицы поднимет нагрузку на них.', s: 'оператор уведомлён', lvl: 'bad' },
-  { d: 'almaty', k: 'T1', t: 'Затор 1,2 км из-за ремонта дороги. Перекрытие влияет на два маршрута автобусов.', s: 'передано в транспортный центр', lvl: 'warn' },
-  { d: 'esil', k: 'C1', t: 'Строительная площадка без разрешения по данным карты: ограждение, техника, котлован. Снимок с координатами сохранил.', s: 'передано в акимат', lvl: 'warn' },
-  { d: 'baikonur', k: 'C1', t: 'Осмотрел опору теплотрассы: трещин и деформаций не вижу, конструкция устойчива. Снимок сохранён.', s: 'без замечаний', lvl: 'info' },
+  { d: 'saryarka', k: 'E2', t: 'Газоанализатор: фиксирую превышение CH₄ у промзоны, ветер на жилой сектор. Прогноз: пик через 2 часа.', s: 'передано в экологическую службу', lvl: 'bad', f: 0 },
+  { d: 'saryarka', k: 'E2', t: 'Вижу дым от котельной частного сектора, видимость снижена.', s: 'наблюдаю', lvl: 'warn', f: 0 },
+  { d: 'almaty', k: 'B2', t: 'ДТП на перекрёстке, две полосы перекрыты. Объезд через соседние улицы поднимет нагрузку на них.', s: 'оператор уведомлён', lvl: 'bad', f: 1 },
+  { d: 'almaty', k: 'T1', t: 'Затор 1,2 км из-за ремонта дороги. Перекрытие влияет на два маршрута автобусов.', s: 'передано в транспортный центр', lvl: 'warn', f: 2 },
+  { d: 'esil', k: 'C1', t: 'Строительная площадка без разрешения по данным карты: ограждение, техника, котлован. Снимок с координатами сохранил.', s: 'передано в акимат', lvl: 'warn', f: 3 },
+  { d: 'baikonur', k: 'C1', t: 'Осмотрел опору теплотрассы: трещин и деформаций не вижу, конструкция устойчива. Снимок сохранён.', s: 'без замечаний', lvl: 'info', f: 4 },
 ];
 const FRAMES = {
   dog: ['/static/img/patrol-cam.jpg', '/static/img/patrol-dog2.jpg', '/static/img/patrol-dog3.jpg', '/static/img/patrol-dog4.jpg', '/static/img/patrol-dog5.jpg'],
   drone: ['/static/img/patrol-dronecam.jpg', '/static/img/patrol-drone2.jpg', '/static/img/patrol-drone3.jpg', '/static/img/patrol-drone4.jpg', '/static/img/patrol-drone5.jpg'],
 };
-function swapFrame() {
+function swapFrame(f) {
   const img = document.querySelector('.patrol-cam img'); if (!img) return;
   const list = FRAMES[state.unit] || FRAMES.dog;
-  state.frame = ((state.frame || 0) + 1) % list.length;
+  state.frame = (typeof f === 'number' ? f : ((state.frame || 0) + 1)) % list.length;
   const box = document.querySelector('.patrol-box');
   img.classList.add('patrol-cam--fade');
   setTimeout(() => { img.src = list[state.frame]; img.onload = () => img.classList.remove('patrol-cam--fade'); if (box) box.style.display = state.frame === 0 ? '' : 'none'; }, 260);
@@ -118,7 +118,7 @@ function pushEvent() {
   if (feed.length > 8) feed.pop();
   if (e.lvl !== 'ok') state.counts[e.d] = (state.counts[e.d] || 0) + 1;
   renderFeed();
-  if (state.open) swapFrame();
+  if (state.open) swapFrame(e.f);
 }
 
 function renderFeed() {
@@ -176,7 +176,7 @@ function openCamera(unit) {
   box.addEventListener('click', e => { if (e.target === box) closeCamera(); });
   document.addEventListener('keydown', escClose);
   const cur = drone ? state.dfeed : state.feed;
-  if (!cur.length) { pushEvent(); pushEvent(); pushEvent(); } else renderFeed();
+  if (!cur.length) { pushEvent(); pushEvent(); pushEvent(); } else { renderFeed(); swapFrame(cur[0].f); }
   state.timer = setInterval(pushEvent, 3200);
   tickClock();
 }
