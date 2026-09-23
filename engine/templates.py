@@ -51,6 +51,19 @@ def cap(s: str) -> str:
     return s[:1].upper() + s[1:]
 
 
+def pts_word(x: float) -> str:
+    """Слово «балл» для числа: целые склоняются, дробные всегда «балла» (3,99 балла)."""
+    return plural(x, "балл", "балла", "баллов") if float(x).is_integer() else "балла"
+
+
+def pts(x: float, n: int = 2) -> str:
+    return f"{fmt(x, n)} {pts_word(round(x, n))}"
+
+
+def spts(x: float, n: int = 2) -> str:
+    return f"{sgn(x, n)} {pts_word(round(abs(x), n))}"
+
+
 def mname(city: City, mid: str, case: str = "nom") -> str:
     if mid in SHORT:
         return SHORT[mid][CASES[case]]
@@ -96,13 +109,13 @@ def template_explanation(city: City, result: dict, candidates: list, facts: list
     # Резюме: три коротких предложения
     sc, bs = fmt(result["score"]), fmt(result["baseline_score"])
     if delta < 0:
-        opener = f"Этот план делает городу хуже: оценка {sc} вместо {bs} на старте."
+        opener = f"Этот план делает городу хуже: оценка {sc} балла вместо {bs} на старте."
     elif delta < 1:
-        opener = f"План почти ничего не меняет: оценка {sc} вместо {bs} на старте."
+        opener = f"План почти ничего не меняет: оценка {sc} балла вместо {bs} на старте."
     elif delta < 3:
-        opener = f"Неплохой план: оценка города выросла с {bs} до {sc}."
+        opener = f"Неплохой план: оценка города выросла с {bs} до {sc} балла."
     else:
-        opener = f"Сильный план: оценка города выросла с {bs} до {sc}."
+        opener = f"Сильный план: оценка города выросла с {bs} до {sc} балла."
     parts = [opener]
     if rank:
         if rank["top_position"] == 1:
@@ -113,15 +126,15 @@ def template_explanation(city: City, result: dict, candidates: list, facts: list
             parts.append("Он обходит 99,9% всех возможных вариантов.")
         else:
             parts.append(f"Он обходит {fmt(rank['percentile'])}% всех возможных вариантов.")
-    parts.append(f"Слабым местом остаётся {worst['name']}, там оценка {fmt(worst['score_after'])}.")
+    parts.append(f"Слабым местом остаётся {worst['name']}, там оценка {fmt(worst['score_after'])} балла.")
     summary = " ".join(parts)
 
     # Сильные стороны
     strengths = []
     if dc["avg"] > 1e-9:
-        strengths.append({"text": f"Город в целом стал жить лучше, это дало {sgn(dc['avg'], 2)} к итогу.", "fact_ids": _ids(dec_f)})
+        strengths.append({"text": f"Город в целом стал жить лучше, это дало {spts(dc['avg'])} к итогу.", "fact_ids": _ids(dec_f)})
     if dc["min"] > 1e-9:
-        strengths.append({"text": f"Самый слабый район подтянулся, и это принесло {sgn(dc['min'], 2)}.", "fact_ids": _ids(dec_f)})
+        strengths.append({"text": f"Самый слабый район подтянулся, и это принесло {spts(dc['min'])}.", "fact_ids": _ids(dec_f)})
     if dc["crit"] > 1e-9:
         n = int(round(dc["crit"]))
         tail = "штраф снят полностью." if not result["critical_pairs"] else f"штраф меньше на {n} {plural(n, 'балл', 'балла', 'баллов')}."
@@ -130,12 +143,12 @@ def template_explanation(city: City, result: dict, candidates: list, facts: list
     for f in _facts_by(facts, "synergy"):
         s = f["data"]
         a, b = s["pair"].split("+")
-        strengths.append({"text": f"{cap(mname(city, a))} плюс {mname(city, b)} дают бонус: {iname(city, s['indicator'])} {where(s['district_id'])} +{s['bonus']}.", "fact_ids": _ids(f)})
+        strengths.append({"text": f"{cap(mname(city, a))} плюс {mname(city, b)} дают бонус: {iname(city, s['indicator'])} {where(s['district_id'])} {spts(s['bonus'], 0)}.", "fact_ids": _ids(f)})
     grown = sorted(_facts_by(facts, "district"), key=lambda f: -f["data"]["gain"])[:2]
     for f in grown:
         d = f["data"]
         if d["gain"] > 1e-9:
-            strengths.append({"text": f"{cap(LOC[d['district_id']])} оценка выросла с {fmt(d['score_before'])} до {fmt(d['score_after'])}.", "fact_ids": _ids(f)})
+            strengths.append({"text": f"{cap(LOC[d['district_id']])} оценка выросла с {fmt(d['score_before'])} до {fmt(d['score_after'])} балла.", "fact_ids": _ids(f)})
     if not strengths:
         strengths.append({"text": "Хвалить нечего: ни одна часть оценки не выросла.", "fact_ids": _ids(dec_f)})
 
@@ -149,7 +162,7 @@ def template_explanation(city: City, result: dict, candidates: list, facts: list
         for e in d["effects"]:
             if e["delta"] < 0:
                 mid = d["measure_id"]
-                risks.append({"text": f"{cap(mname(city, mid))} {where(d['district_id'])} немного {verb(mid, 'ухудшает', 'ухудшают')} показатель «{iname(city, e['code'])}» ({sgn(e['delta'])}).", "fact_ids": _ids(f)})
+                risks.append({"text": f"{cap(mname(city, mid))} {where(d['district_id'])} немного {verb(mid, 'ухудшает', 'ухудшают')} показатель «{iname(city, e['code'])}» ({spts(e['delta'], 1)}).", "fact_ids": _ids(f)})
     for f in _facts_by(facts, "district_unchanged"):
         risks.append({"text": f"До {GEN[f['data']['district_id']]} ни одна мера не дошла, район остаётся как был.", "fact_ids": _ids(f)})
     chosen = {d["measure_id"] for d in result["decisions"]}
@@ -157,7 +170,7 @@ def template_explanation(city: City, result: dict, candidates: list, facts: list
         a, b = s["pair"]
         if (a in chosen) != (b in chosen):
             have, miss = (a, b) if a in chosen else (b, a)
-            risks.append({"text": f"{cap(mname(city, have))} без {mname(city, miss, 'gen')} {verb(have, 'не даёт', 'не дают')} бонус связки: вместе они добавили бы ещё +{s['bonus']} к показателю «{iname(city, s['indicator'])}».", "fact_ids": _ids(plan_f)})
+            risks.append({"text": f"{cap(mname(city, have))} без {mname(city, miss, 'gen')} {verb(have, 'не даёт', 'не дают')} бонус связки: вместе они добавили бы ещё {spts(s['bonus'], 0)} к показателю «{iname(city, s['indicator'])}».", "fact_ids": _ids(plan_f)})
     for f in _facts_by(facts, "measure"):
         d = f["data"]
         if d["realized_fraction"] <= 0.5:
@@ -167,7 +180,7 @@ def template_explanation(city: City, result: dict, candidates: list, facts: list
     if rb >= 10:
         risks.append({"text": f"{rb} {plural(rb, 'единица', 'единицы', 'единиц')} бюджета {plural(rb, 'осталась', 'остались', 'остались')} без дела, а остаток ничего не даёт: я бы заменил одну меру на более дорогую и сильную.", "fact_ids": _ids(plan_f)})
     if not risks:
-        risks.append({"text": f"{worst['name']} остаётся самым слабым районом, и пока это так, итог выше не поднять.", "fact_ids": _ids(worst_f)})
+        risks.append({"text": f"{worst['name']} остаётся самым слабым районом с оценкой {fmt(worst['score_after'])} балла, и пока это так, итог выше не поднять.", "fact_ids": _ids(worst_f)})
     risks = risks[:5]
 
     # Что можно сделать
@@ -175,20 +188,20 @@ def template_explanation(city: City, result: dict, candidates: list, facts: list
     for f in _facts_by(facts, "candidate"):
         c = next(x for x in candidates if x["id"] == f["data"]["candidate_id"])
         suggestions.append({"candidate_id": c["id"],
-                            "text": f"Если заменить {measure_phrase(city, c['replace'], 'acc')} на {measure_phrase(city, c['with'], 'acc')}, оценка станет {fmt(c['score'])}, это {sgn(c['delta'], 2)} при бюджете {c['cost']}.",
+                            "text": f"Если заменить {measure_phrase(city, c['replace'], 'acc')} на {measure_phrase(city, c['with'], 'acc')}, оценка станет {fmt(c['score'])} балла, это {spts(c['delta'])} при бюджете {c['cost']}.",
                             "fact_ids": _ids(f)})
 
     comparison = None
     if index and index.get("top"):
         best = index["top"][0]
         if best["scenario_key"] == result["scenario_key"]:
-            comparison = f"Это лучший план из всех возможных, выше {fmt(best['score'])} в этой модели не подняться."
+            comparison = f"Это лучший план из всех возможных, выше {fmt(best['score'])} балла в этой модели не подняться."
         else:
             mine = {(d["measure_id"], d.get("district_id")) for d in result["decisions"]}
             theirs = {(d["measure_id"], d.get("district_id")) for d in best["decisions"]}
             remove = [d for d in result["decisions"] if (d["measure_id"], d.get("district_id")) not in theirs]
             add = [d for d in best["decisions"] if (d["measure_id"], d.get("district_id")) not in mine]
-            comparison = (f"Лучший план даёт {fmt(best['score'])}, вам не хватает {fmt(best['score'] - result['score'])}. "
+            comparison = (f"Лучший план даёт {fmt(best['score'])} балла, вам не хватает {pts(best['score'] - result['score'], 1)}. "
                           f"В нём вместо {', '.join(measure_phrase(city, d, 'gen') for d in remove)} "
                           f"стоят {', '.join(measure_phrase(city, d) for d in add)}.")
     return {"summary": summary, "strengths": strengths[:5], "risks": risks, "suggestions": suggestions, "comparison": comparison}

@@ -6,6 +6,9 @@ const $ = (s, r = document) => r.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fmt = (v, d = 2) => (v == null || isNaN(v)) ? '—' : Number(v).toFixed(d).replace('.', ',');
 const sgn = (v, d = 2) => (v > 0 ? '+' : v < 0 ? '−' : '') + fmt(Math.abs(v), d);
+const ptsWord = v => { const a = Math.abs(Number(v)); if (!Number.isInteger(a)) return 'балла'; const r = a % 10, t = a % 100; return (t >= 11 && t <= 19) ? 'баллов' : r === 1 ? 'балл' : (r >= 2 && r <= 4) ? 'балла' : 'баллов'; };
+const pts = (v, d = 2) => fmt(v, d) + ' ' + ptsWord(Number(Number(v).toFixed(d)));
+const spts = (v, d = 2) => sgn(v, d) + ' ' + ptsWord(Number(Math.abs(Number(v)).toFixed(d)));
 
 /* ---------- карта: контуры и точки в системе viewBox 2000×1493 ---------- */
 const MAP = {
@@ -176,7 +179,7 @@ function renderPlaques() {
     return `<button type="button" class="plq${state.detail === d.id ? ' is-open' : ''}${d.id === weakest.id ? ' is-weak' : ''}" id="plq-${d.id}" data-d="${d.id}" style="left:${x}%;top:${y}%;animation-delay:${i * 70}ms" aria-label="${esc(d.name)}: ${fmt(val)}">
       <div class="plq__n">${esc(d.name)} · ${Math.round(d.population * 100)}%</div>
       <div class="plq__v" data-v="${val}">${fmt(state.shown[d.id] ?? val)}</div>
-      <div class="plq__d ${delta > 0 ? 'up' : delta < 0 ? 'down' : ''}">${delta != null ? sgn(delta) + ' к базе' : 'база'}</div>
+      <div class="plq__d ${delta > 0 ? 'up' : delta < 0 ? 'down' : ''}">${delta != null ? spts(delta) + ' к базе' : 'база'}</div>
       ${d.id === weakest.id ? '<span class="plq__weak" title="Оценка этого района сейчас минимальна: она входит в Score с весом 0,3">слабейший район</span>' : ''}
       ${v.crit ? `<span class="plq__bad" title="Показателей ниже ${state.city.critical_threshold}: ${v.crit}">${v.crit}</span>` : ''}
     </button>`;
@@ -207,8 +210,11 @@ function toggleDetail(id) {
 }
 
 function renderDetail() {
-  const box = $('#detail');
-  if (!state.detail) { box.hidden = true; box.innerHTML = ''; return; }
+  const box = $('#modal');
+  if (!state.detail) { if (state.modal && state.modal.detail) closeModal(); return; }
+  if (!state.modal || !state.modal.detail) { modalOpener = document.activeElement; document.querySelectorAll('.top, .stage').forEach(el => el.setAttribute('inert', '')); }
+  state.modal = { detail: state.detail };
+  box.hidden = false;
   const v = districtView(state.detail);
   const r = state.result?.valid ? state.result.district_results.find(x => x.id === state.detail) : null;
   const thr = state.city.critical_threshold;
@@ -219,21 +225,24 @@ function renderDetail() {
     const delta = after != null ? after - before : 0;
     const crit = cur < thr;
     const lo = Math.min(before, cur), hi = Math.max(before, cur);
-    return `<div class="irow${crit ? ' irow--crit' : ''}" title="${esc(ind.name)}">
-      <span class="irow__code">${ind.code}</span>
+    return `<div class="irow${crit ? ' irow--crit' : ''}">
+      <span class="irow__code" data-dir="${ind.direction || ''}">${ind.code}</span>
       <span class="irow__name">${esc(ind.name)}</span>
-      <span class="irow__nums">${fmt(before, 0)}${after != null ? ` → <span class="${delta > 0 ? 'up' : delta < 0 ? 'down' : ''}">${fmt(after, 1)}</span>` : ''}</span>
+      <span class="irow__nums">${after != null && delta ? `<em class="${delta > 0 ? 'up' : 'down'}">${sgn(delta, 1)}</em>` : ''}<b>${after != null ? fmt(after, 1) : fmt(before, 0)}</b>${after != null ? `<small>было ${fmt(before, 0)}</small>` : ''}</span>
       <span class="irow__bar"><i style="width:${lo}%"></i>${delta ? `<b class="${delta < 0 ? 'neg' : ''}" style="left:${lo}%;width:${hi - lo}%"></b>` : ''}<s style="left:${thr}%"></s></span>
     </div>`;
   }).join('');
-  box.hidden = false;
-  box.innerHTML = `<div class="detail__head">
-      <h3>${esc(v.d.name)}</h3>
-      <span class="meta">доля населения ${Math.round(v.d.population * 100)}% · оценка района ${fmt(v.before)}${v.after != null ? ` → <b>${fmt(v.after)}</b>` : ''}</span>
-    </div>
-    <div class="detail__hint">${v.after != null ? 'Показатели после пяти решений на горизонте 8 кварталов.' : 'Исходные показатели. Итог появится после пятого решения.'}</div>
-    <div class="irows">${rows}</div>
-    <div class="legend">Шкала 0–100, больше значит лучше. Янтарная отметка — порог ${thr}: ниже него показатель критический и штрафует Score.</div>`;
+  box.innerHTML = `<div class="dlg dlg--district" role="dialog" aria-modal="true" aria-label="${esc(v.d.name)}">
+    <div class="dlg__head"><div><div class="dlg__kicker">Район · доля населения ${Math.round(v.d.population * 100)}%</div><h3>${esc(v.d.name)}</h3>
+      <div class="dlg__meta"><span>оценка района <b>${fmt(v.before)}</b>${v.after != null ? ` → <b>${fmt(v.after)}</b>` : ''}</span>${v.crit ? `<span>критических показателей: <b>${v.crit}</b></span>` : ''}</div></div>
+      <button type="button" class="dlg__x" data-close aria-label="Закрыть">×</button></div>
+    <div class="dlg__sec"><h4>${v.after != null ? 'Показатели после пяти решений, горизонт 8 кварталов' : 'Исходные показатели, итог появится после пятого решения'}</h4>
+      <div class="irows">${rows}</div>
+      <div class="legend legend--keys"><span><i class="lg lg--base"></i>исходное значение</span><span><i class="lg lg--up"></i>прирост после мер</span><span><i class="lg lg--down"></i>снижение</span><span><i class="lg lg--thr"></i>порог ${thr}: ниже него показатель критический и отнимает балл</span><span class="legend__note">Шкала 0–100, больше значит лучше</span></div></div>
+    <div class="dlg__foot"><button type="button" class="btn" data-close>Закрыть</button></div>
+  </div>`;
+  box.querySelectorAll('[data-close]').forEach(b => b.addEventListener('click', () => toggleDetail(state.detail)));
+  box.onclick = e => { if (e.target === box) toggleDetail(state.detail); };
 }
 
 /* ---------- панель Score на карте ---------- */
@@ -273,12 +282,12 @@ function renderScore() {
   const rankLine = rk ? (rk.top_position ? `${rk.top_position}-е место из ${rk.total.toLocaleString('ru-RU')} планов` : `лучше ${fmt(Math.min(rk.percentile, 99.9), 1)}% из ${rk.total.toLocaleString('ru-RU')} планов`) : '';
   box.innerHTML = `<div class="score__l">Quality of Life Score</div>
     <div class="score__v">${fmt(r.score)} <small>было ${fmt(r.baseline_score)}</small></div>
-    <div class="score__d ${r.delta > 0 ? 'up' : r.delta < 0 ? 'down' : ''}">${sgn(r.delta)} к базе${rankLine ? ' · ' + rankLine : ''}</div>
+    <div class="score__d ${r.delta > 0 ? 'up' : r.delta < 0 ? 'down' : ''}">${spts(r.delta)} к базе${rankLine ? ' · ' + rankLine : ''}</div>
     <div class="score__hint">Слабейший район: ${fmt(r.minimum)} · критических: ${r.critical_count} · бюджет ${r.cost} из ${c.budget}</div>
     <div class="score__terms">
-      <span>средний по городу</span><b class="${d.avg > 0 ? 'up' : d.avg < 0 ? 'down' : ''}">${sgn(d.avg)}</b>
-      <span>слабейший район</span><b class="${d.min > 0 ? 'up' : d.min < 0 ? 'down' : ''}">${sgn(d.min)}</b>
-      <span>штраф за провалы</span><b class="${d.crit > 0 ? 'up' : d.crit < 0 ? 'down' : ''}">${sgn(d.crit)}</b>
+      <span>средний по городу</span><b class="${d.avg > 0 ? 'up' : d.avg < 0 ? 'down' : ''}">${spts(d.avg)}</b>
+      <span>слабейший район</span><b class="${d.min > 0 ? 'up' : d.min < 0 ? 'down' : ''}">${spts(d.min)}</b>
+      <span>штраф за провалы</span><b class="${d.crit > 0 ? 'up' : d.crit < 0 ? 'down' : ''}">${spts(d.crit)}</b>
     </div>`;
 }
 
@@ -374,6 +383,7 @@ function openBuild(id) {
 }
 let modalOpener = null;
 function closeModal() {
+  if (state.modal && state.modal.detail) { state.detail = null; document.querySelectorAll('#map-hot polygon, .plq').forEach(p => p.classList.remove('is-open')); }
   state.modal = null; $('#modal').hidden = true; $('#modal').innerHTML = '';
   document.querySelectorAll('.top, .stage').forEach(el => el.removeAttribute('inert'));
   if (modalOpener && document.contains(modalOpener)) modalOpener.focus();
@@ -613,7 +623,7 @@ function openAdvisor() {
   state.modal = { advisor: true };
   const box = $('#modal'); box.hidden = false;
   box.innerHTML = `<div class="dlg dlg--advisor" role="dialog" aria-modal="true" aria-label="Советник акима">
-    <div class="dlg__head"><div class="dlg__gear">${ADVISOR_ICON}</div><div><div class="dlg__kicker">AI-советник</div><h3>Советник акима</h3><div class="dlg__meta" id="advisor-badge"></div></div>
+    <div class="dlg__head"><img class="dlg__face" src="/static/img/advisor.png" alt=""><div><div class="dlg__kicker">AI-советник</div><h3>Советник акима</h3><div class="dlg__meta" id="advisor-badge"></div></div>
       <button type="button" class="dlg__x" data-close aria-label="Закрыть">×</button></div>
     <div class="advisor" id="advisor"></div>
   </div>`;
@@ -652,13 +662,14 @@ function renderAdvisor() {
       const a = measureById(c.replace.measure_id), b = measureById(c.with.measure_id);
       const where = d => d.district_id ? districtById(d.district_id).name : 'весь город';
       const note = (x?.explanation?.suggestions || []).find(s => s.candidate_id === c.id);
-      return `<div class="alt"><div class="alt__body"><b>${fmt(c.score)}</b> (${sgn(c.delta)}) · бюджет ${c.cost}<small>${esc(a.name)} (${esc(where(c.replace))}) → ${esc(b.name)} (${esc(where(c.with))})</small>${note ? `<small>${esc(note.text)}</small>` : ''}</div>
+      return `<div class="alt"><div class="alt__body"><b>${pts(c.score)}</b> (${spts(c.delta)}) · бюджет ${c.cost}<small>${esc(a.name)} (${esc(where(c.replace))}) → ${esc(b.name)} (${esc(where(c.with))})</small>${note ? `<small>${esc(note.text)}</small>` : ''}</div>
         <button type="button" class="btn btn--sm" data-apply="${c.id}">Применить</button></div>`;
     }).join('');
-  const chatHtml = `<h4>Спросить советника</h4>
+  const chatHtml = `<div class="ask"><img class="ask__face" src="/static/img/advisor.png" alt="">
+    <div class="ask__body"><h4 class="ask__h">Спросить советника</h4>
     <div class="chat" id="chat-log">${state.chat.map(m => `<div class="msg msg--${m.role}${m.mode === 'error' ? ' msg--err' : ''}">${esc(m.content)}${m.role === 'assistant' && m.mode === 'live' && m.checked === false ? '<small>числа не сверены с расчётом</small>' : ''}</div>`).join('')}${state.chatBusy ? '<div class="msg msg--assistant"><span class="spinner"></span>…</div>' : ''}</div>
-    <form class="chatrow" id="chat-form"><input type="text" id="chat-input" placeholder="Например: что поменять, чтобы обогнать лучший план?" maxlength="500" ${state.chatBusy ? 'disabled' : ''}><button type="submit" class="btn btn--sm" ${state.chatBusy ? 'disabled' : ''}>Отправить</button></form>
-    <div class="advisor__empty">Диалог работает только с ключом OpenAI (шестерёнка в шапке).</div>`;
+    <form class="chatrow" id="chat-form"><input type="text" id="chat-input" placeholder="Например: что поменять, чтобы обогнать лучший план?" maxlength="500" ${state.chatBusy ? 'disabled' : ''}><button type="submit" class="btn" ${state.chatBusy ? 'disabled' : ''}>Спросить</button></form>
+    <div class="ask__hint">Отвечает с ключом OpenAI (шестерёнка в шапке). Числа берёт из расчёта.</div></div></div>`;
   const bd = $('#advisor-badge'); if (bd) bd.innerHTML = badge;
   box.innerHTML = `${bodyHtml}${candHtml}${chatHtml}`;
   box.querySelectorAll('[data-apply]').forEach(b => b.addEventListener('click', () => applyCandidate(b.dataset.apply)));
