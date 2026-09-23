@@ -141,7 +141,7 @@ function openCamera(unit) {
     <div class="patrol-demo" role="note">Демонстрация концепции: камера и события заранее заданы, реального робота и потока нет.</div>
     <div class="patrol-body">
       <div class="patrol-cam">
-        <img src="/static/img/patrol-cam.jpg" alt="Демонстрационный кадр: как выглядел бы кадр с камеры робота-собаки">
+        <img src="${drone ? '/static/img/patrol-dronecam.jpg' : '/static/img/patrol-cam.jpg'}" alt="Демонстрационный кадр: как выглядел бы кадр с камеры ${drone ? 'дрона' : 'робота-собаки'}">
         <div class="patrol-ovl patrol-ovl--tl"><span class="patrol-rec"></span>ДЕМО · запись · 640×480</div>
         <div class="patrol-ovl patrol-ovl--tr" id="patrol-clock"></div>
         <div class="patrol-ovl patrol-ovl--bl">демонстрация · район: <span id="patrol-where"></span></div>
