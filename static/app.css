@@ -638,3 +638,51 @@ h1, h2, h3 { margin: 0; font-family: var(--font-display); letter-spacing: .1px; 
 .dlg--district .irow__bar s { width: 2px; top: -3px; bottom: -3px; background: var(--warn); border-radius: 1px; }
 .dlg--district .irow--crit .irow__name { color: var(--bad); }
 .dlg--district .irow--crit .irow__nums b { color: var(--bad); }
+
+/* выравнивание строки метаданных в шапке окна */
+.dlg__meta { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; line-height: 1.3; }
+.dlg__meta > span { display: inline-flex; align-items: baseline; gap: 4px; }
+.dlg__meta b { line-height: 1; }
+
+
+/* ===== таблички районов: обновлённый вид ===== */
+.plq {
+  min-width: 132px; padding: 8px 14px 10px; border-radius: 14px; border: 1px solid rgba(217,224,234,.9);
+  background: linear-gradient(180deg, rgba(255,255,255,.98), rgba(247,249,252,.98));
+  box-shadow: 0 6px 18px rgba(15,42,74,.16), inset 0 1px 0 #fff;
+}
+.plq::before { content: ""; position: absolute; left: 14px; right: 14px; top: 0; height: 3px; border-radius: 0 0 3px 3px; background: var(--line); }
+.plq--up::before { background: var(--good); }
+.plq--down::before { background: var(--bad); }
+.plq.is-weak::before { background: #e0563f; }
+.plq.is-weak { border-color: rgba(224,86,63,.45); background: linear-gradient(180deg, #fff, #fff4f2); }
+.plq.is-weak::after { content: ""; position: absolute; inset: -6px; border-radius: 18px; border: 2px solid rgba(224,86,63,.6); pointer-events: none; animation: radar 3.2s linear infinite; }
+.plq__n { display: flex; align-items: center; justify-content: center; gap: 6px; font-size: 12px; }
+.plq__name { font-weight: 700; color: var(--ink); letter-spacing: .2px; }
+.plq__pop { font: 600 10px/1 var(--font-mono); color: var(--ink-3); background: var(--line-2); padding: 3px 5px; border-radius: 999px; }
+.plq__v { font: 700 28px/1.05 var(--font-display); color: var(--ink); margin-top: 3px; letter-spacing: -.3px; }
+.plq__v small { font: 600 10px/1 var(--font-body); color: var(--ink-3); margin-left: 3px; letter-spacing: .2px; }
+.plq__bar { height: 4px; border-radius: 2px; background: var(--line-2); margin: 5px 2px 6px; overflow: hidden; }
+.plq__bar i { display: block; height: 100%; border-radius: 2px; background: linear-gradient(90deg, #7a9cd0, var(--accent)); transition: width .8s var(--ease-settle); }
+.plq--up .plq__bar i { background: linear-gradient(90deg, #7fc39d, var(--good)); }
+.plq.is-weak .plq__bar i { background: linear-gradient(90deg, #f0a08f, #e0563f); }
+.plq__d { display: inline-flex; align-items: center; gap: 4px; height: auto; padding: 3px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; background: var(--line-2); color: var(--ink-3); }
+.plq__d b { font-size: 9px; }
+.plq__d.up { background: var(--good-soft); color: var(--good); }
+.plq__d.down { background: var(--bad-soft); color: var(--bad); }
+.plq__weak { display: inline-block; margin-top: 5px; padding: 2px 8px; border-radius: 999px; background: #e0563f; color: #fff; font-size: 10px; font-weight: 700; letter-spacing: .4px; text-transform: uppercase; }
+.plq__bad { top: -8px; right: -8px; box-shadow: 0 2px 6px rgba(183,121,31,.4); }
+
+.plq__vrow { display: flex; align-items: baseline; justify-content: center; gap: 4px; margin-top: 3px; }
+.plq__unit { font: 600 10px/1 var(--font-body); color: var(--ink-3); letter-spacing: .2px; }
+
+/* ===== плашки районов компактнее ===== */
+.plq { min-width: 96px; max-width: 150px; padding: 6px 10px 7px; border-radius: 10px; }
+.plq__n { font-size: 11px; gap: 5px; }
+.plq__pop { font-size: 9px; padding: 2px 4px; }
+.plq__v { font-size: 22px; margin-top: 2px; }
+.plq__bar { margin: 4px 2px 5px; height: 3px; }
+.plq__d { padding: 2px 7px; font-size: 10px; }
+.plq__weak { margin-top: 4px; padding: 2px 6px; font-size: 8.5px; letter-spacing: .3px; }
+.plq.is-weak::after { inset: -5px; border-radius: 14px; }
+.plq__bad { min-width: 18px; height: 18px; line-height: 18px; font-size: 10px; top: -7px; right: -7px; }

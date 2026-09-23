@@ -176,10 +176,12 @@ function renderPlaques() {
     const [x, y] = MAP.anchor[d.id];
     const val = v.after ?? v.before;
     const delta = v.after != null ? v.after - v.before : null;
-    return `<button type="button" class="plq${state.detail === d.id ? ' is-open' : ''}${d.id === weakest.id ? ' is-weak' : ''}" id="plq-${d.id}" data-d="${d.id}" style="left:${x}%;top:${y}%;animation-delay:${i * 70}ms" aria-label="${esc(d.name)}: ${fmt(val)}">
-      <div class="plq__n">${esc(d.name)} · ${Math.round(d.population * 100)}%</div>
-      <div class="plq__v" data-v="${val}">${fmt(state.shown[d.id] ?? val)}</div>
-      <div class="plq__d ${delta > 0 ? 'up' : delta < 0 ? 'down' : ''}">${delta != null ? spts(delta) + ' к базе' : 'база'}</div>
+    const tone = delta == null ? '' : delta > 0 ? ' plq--up' : delta < 0 ? ' plq--down' : '';
+    return `<button type="button" class="plq${tone}${state.detail === d.id ? ' is-open' : ''}${d.id === weakest.id ? ' is-weak' : ''}" id="plq-${d.id}" data-d="${d.id}" style="left:${x}%;top:${y}%;animation-delay:${i * 70}ms" aria-label="${esc(d.name)}: ${fmt(val)}">
+      <div class="plq__n"><span class="plq__name">${esc(d.name)}</span><span class="plq__pop" title="доля населения">${Math.round(d.population * 100)}%</span></div>
+      <div class="plq__vrow"><span class="plq__v" data-v="${val}">${fmt(state.shown[d.id] ?? val)}</span><small class="plq__unit">балла</small></div>
+      <div class="plq__bar"><i style="width:${Math.max(0, Math.min(100, val))}%"></i></div>
+      ${delta != null ? `<div class="plq__d ${delta > 0 ? 'up' : delta < 0 ? 'down' : ''}"><b>${delta > 0 ? '▲' : delta < 0 ? '▼' : '•'}</b>${spts(delta)} к старту</div>` : ''}
       ${d.id === weakest.id ? '<span class="plq__weak" title="Оценка этого района сейчас минимальна: она входит в Score с весом 0,3">слабейший район</span>' : ''}
       ${v.crit ? `<span class="plq__bad" title="Показателей ниже ${state.city.critical_threshold}: ${v.crit}">${v.crit}</span>` : ''}
     </button>`;
@@ -269,7 +271,7 @@ function renderScore() {
   }
   if (!r) {
     box.innerHTML = `<div class="score__l">Quality of Life Score</div>
-      <div class="score__v">${fmt(b.score)} <small>база</small></div>
+      <div class="score__v">${fmt(b.score)} <small>до решений</small></div>
       <div class="score__hint">${state.offline ? 'Сервер недоступен, итог посчитать нельзя' : left > 0 ? `Осталось выбрать ${left} ${left === 1 ? 'меру' : left < 5 ? 'меры' : 'мер'}` : 'Нажмите «Рассчитать»'}</div>
       <div class="score__terms">
         <span>0,7 × средний по городу</span><b>${fmt(b.average)}</b>
@@ -281,8 +283,8 @@ function renderScore() {
   const d = r.decomposition, rk = r.rank;
   const rankLine = rk ? (rk.top_position ? `${rk.top_position}-е место из ${rk.total.toLocaleString('ru-RU')} планов` : `лучше ${fmt(Math.min(rk.percentile, 99.9), 1)}% из ${rk.total.toLocaleString('ru-RU')} планов`) : '';
   box.innerHTML = `<div class="score__l">Quality of Life Score</div>
-    <div class="score__v">${fmt(r.score)} <small>было ${fmt(r.baseline_score)}</small></div>
-    <div class="score__d ${r.delta > 0 ? 'up' : r.delta < 0 ? 'down' : ''}">${spts(r.delta)} к базе${rankLine ? ' · ' + rankLine : ''}</div>
+    <div class="score__v">${fmt(r.score)} <small>было ${fmt(r.baseline_score)} до решений</small></div>
+    <div class="score__d ${r.delta > 0 ? 'up' : r.delta < 0 ? 'down' : ''}">${spts(r.delta)} к старту${rankLine ? ' · ' + rankLine : ''}</div>
     <div class="score__hint">Слабейший район: ${fmt(r.minimum)} · критических: ${r.critical_count} · бюджет ${r.cost} из ${c.budget}</div>
     <div class="score__terms">
       <span>средний по городу</span><b class="${d.avg > 0 ? 'up' : d.avg < 0 ? 'down' : ''}">${spts(d.avg)}</b>
@@ -332,7 +334,7 @@ function renderTabs() {}
 function effectChips(m) {
   return Object.entries(m.effects).map(([k, v]) => {
     const ind = state.city.indicators.find(i => i.code === k);
-    return `<span class="chip${v < 0 ? ' chip--neg' : ''}" title="${esc(ind ? ind.name : k)}: ${v > 0 ? '+' : ''}${v} полный эффект, ${sgn(v * realized(m), 1)} с учётом лага">${k}${v > 0 ? '+' : ''}${v}</span>`;
+    return `<span class="chip${v < 0 ? ' chip--neg' : ''}" title="${esc(ind ? ind.name : k)}: ${v > 0 ? '+' : ''}${v} полный эффект, ${sgn(v * realized(m), 1)} за два года с учётом задержки">${k}${v > 0 ? '+' : ''}${v}</span>`;
   }).join('');
 }
 
@@ -417,7 +419,7 @@ function renderModal() {
   box.hidden = false;
   box.innerHTML = `<div class="dlg" role="dialog" aria-modal="true" aria-label="${esc(m.name)}">
     <div class="dlg__head"><img class="dlg__icon" src="${iconSrc(m.id)}" alt=""><div><div class="dlg__kicker">Городское улучшение · ${esc(dirName(m.direction))}</div><h3>${esc(m.name)}</h3>
-      <div class="dlg__meta"><span><b>${m.cost}</b> ед. из ${state.city.budget - planCost()} доступных</span><span>лаг ${m.lag} кв. · реализуется ${Math.round(realized(m) * 100)}%</span></div></div></div>
+      <div class="dlg__meta"><span><b>${m.cost}</b> ед. из ${state.city.budget - planCost()} доступных</span><span>заработает через ${m.lag} кв. · за 2 года даст ${Math.round(realized(m) * 100)}% эффекта</span></div></div></div>
     <div class="dlg__sec"><h4>Эффекты</h4><div class="eff">${eff}</div>${syn}</div>
     ${dsel}
     ${why ? `<div class="dlg__why">${esc(why)}</div>` : ''}
@@ -733,7 +735,7 @@ function openHow() {
       <ol class="how__steps"><li>У вас бюджет <b>${c.budget}</b> единиц и пять районов с десятью показателями от 0 до 100.</li><li>Выберите ровно <b>${c.decisions_required}</b> мер из ${c.measures.length}. Для районной меры укажите район, городская действует на все районы.</li><li>После пятого решения сервер пересчитывает показатели и Score, советник объясняет результат.</li></ol></div>
     <div class="dlg__sec"><h4>Формула</h4>
       <div class="how__formula">Score = 0,7 × средний по городу + 0,3 × слабейший район − число показателей ниже ${c.critical_threshold}</div>
-      <ul class="how__list"><li>Эффект меры умножается на (${c.horizon} − лаг) / ${c.horizon}: чем позже мера заработает, тем меньше даст за горизонт.</li><li>Средний по городу взвешен по доле населения районов.</li><li>Слабейший район даёт 30 % веса: нельзя вытянуть один район и забыть про остальные. На карте он отмечен кольцом и подписью «слабейший район», бейдж с цифрой показывает число показателей ниже ${c.critical_threshold}.</li><li>Каждый показатель ниже ${c.critical_threshold} отнимает балл.</li></ul></div>
+      <ul class="how__list"><li>Эффект меры умножается на (${c.horizon} − задержка) / ${c.horizon}: чем позже мера заработает, тем меньше даст за горизонт.</li><li>Средний по городу взвешен по доле населения районов.</li><li>Слабейший район даёт 30 % веса: нельзя вытянуть один район и забыть про остальные. На карте он отмечен кольцом и подписью «слабейший район», бейдж с цифрой показывает число показателей ниже ${c.critical_threshold}.</li><li>Каждый показатель ниже ${c.critical_threshold} отнимает балл.</li></ul></div>
     <div class="dlg__sec"><h4>Ограничения</h4>
       <ul class="how__list"><li>Бюджет ${c.budget}, остаток не сгорает и не даёт бонуса.</li><li>Каждая мера один раз, не более ${c.max_per_direction} мер из одного направления.</li></ul>
       <h4 style="margin-top:12px">Синергии</h4><ul class="how__list">${syn}</ul>
