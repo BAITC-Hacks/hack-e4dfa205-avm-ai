@@ -1,4 +1,5 @@
 # tests/test_api.py
+import asyncio
 import json
 import pytest
 from fastapi.testclient import TestClient
@@ -83,3 +84,36 @@ def test_unknown_field_and_too_many_rejected(client):
 def test_body_limit(client):
     big = {"decisions": [{"measure_id": "M12", "district_id": "x" * 20000}]}
     assert client.post("/api/evaluate", json=big).status_code == 413
+
+
+def test_body_limit_stops_reading_chunked_stream():
+    # TestClient читает тело целиком до вызова приложения, поэтому middleware проверяется через ASGI напрямую:
+    # тело без Content-Length тремя чанками по 16 385 байт, ответ 413 после первого чанка, остальные не запрошены
+    app = create_app()
+    chunks = [b"x" * 16385] * 3
+    received, sent = [], []
+
+    async def receive():
+        received.append(1)
+        return {"type": "http.request", "body": chunks[len(received) - 1], "more_body": len(received) < len(chunks)}
+
+    async def send(message):
+        sent.append(message)
+
+    scope = {"type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1", "method": "POST", "scheme": "http",
+             "path": "/api/evaluate", "raw_path": b"/api/evaluate", "query_string": b"", "root_path": "",
+             "headers": [(b"host", b"testserver"), (b"content-type", b"application/json")],
+             "client": ("testclient", 50000), "server": ("testserver", 80)}
+    asyncio.run(app(scope, receive, send))
+    start = next(m for m in sent if m["type"] == "http.response.start")
+    body = b"".join(m.get("body", b"") for m in sent if m["type"] == "http.response.body")
+    assert start["status"] == 413 and json.loads(body) == {"detail": "body too large"}
+    assert len(received) == 1
+
+
+def test_body_limit_passes_small_chunked_stream(client):
+    # Обычное тело чанками доходит до маршрута целиком
+    raw = json.dumps(EX).encode()
+    parts = [raw[i:i + 7] for i in range(0, len(raw), 7)]
+    r = client.post("/api/evaluate", content=iter(parts), headers={"Content-Type": "application/json"})
+    assert r.status_code == 200 and r.json()["valid"] is True

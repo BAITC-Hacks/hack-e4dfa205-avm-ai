@@ -45,13 +45,26 @@ class ChatIn(BaseModel):
 
 
 class BodyLimitMiddleware(BaseHTTPMiddleware):
-    """Читает тело POST целиком и отвечает 413, если фактически получено больше MAX_BODY байт."""
+    """Ограничивает тело POST: отказ 413 по заголовку Content-Length, затем по фактически прочитанным байтам.
+    Тело читается по чанкам и чтение прекращается, как только сумма превысила MAX_BODY."""
+
+    @staticmethod
+    def _too_large() -> JSONResponse:
+        return JSONResponse({"detail": "body too large"}, status_code=413)
 
     async def dispatch(self, request: Request, call_next):
         if request.method == "POST":
-            body = await request.body()
-            if len(body) > MAX_BODY:
-                return JSONResponse({"detail": "body too large"}, status_code=413)
+            declared = request.headers.get("content-length", "")
+            if declared.isdigit() and int(declared) > MAX_BODY:
+                return self._too_large()
+            chunks, size = [], 0
+            async for chunk in request.stream():
+                size += len(chunk)
+                if size > MAX_BODY:
+                    return self._too_large()
+                chunks.append(chunk)
+            # Starlette кэширует тело в _body и отдаёт его дальше по цепочке, маршрут получает прочитанные байты
+            request._body = b"".join(chunks)
         return await call_next(request)
 
 

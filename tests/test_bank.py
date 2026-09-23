@@ -118,6 +118,21 @@ def test_chat_modes(monkeypatch):
     assert err["mode"] == "error"
 
 
+def test_chat_empty_model_reply(monkeypatch):
+    r, c, f = _prep()
+    monkeypatch.setenv("OPENAI_API_KEY", "k")
+    msgs = [{"role": "user", "content": "что улучшить?"}]
+    none_reply = ex.chat(CITY, r, c, f, INDEX, None, msgs, call_model=lambda s, m, k: (None, "m"))
+    assert none_reply["mode"] == "error" and none_reply["model"] is None and none_reply["numbers_checked"] is False
+    blank_reply = ex.chat(CITY, r, c, f, INDEX, None, msgs, call_model=lambda s, m, k: ("   ", "m"))
+    assert blank_reply["mode"] == "error" and blank_reply["reply"]
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    client = TestClient(create_app(chat_model=lambda s, m, k: (None, "m")))
+    resp = client.post("/api/chat", json={**BODY, "messages": msgs}, headers={"X-OpenAI-Key": "user-key"})
+    assert resp.status_code == 200
+    assert resp.json()["mode"] == "error"
+
+
 def test_api_top_rank_chat_and_key_header(monkeypatch):
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     ex.clear_cache()

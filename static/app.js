@@ -114,8 +114,11 @@ const state = {
   explain: null,          // ответ /api/explain для текущего scenario_key
   explainBusy: false,
   candidates: null,       // ответ /api/improvements
+  candidatesError: null,  // текст ошибки поиска замен (сеть, сервер), null если ошибки нет
+  improveBusy: false,     // идёт запрос improvements
   chat: [],               // [{role, content}]
   chatBusy: false,
+  advisorOpen: false,     // окно советника открыто
   key: '',                // ключ OpenAI из интерфейса, только sessionStorage
   keyStatus: null,        // { ok, model, error, key_source }
 };
@@ -386,6 +389,7 @@ function openBuild(id) {
 let modalOpener = null;
 function closeModal() {
   if (state.modal && state.modal.detail) { state.detail = null; document.querySelectorAll('#map-hot polygon, .plq').forEach(p => p.classList.remove('is-open')); }
+  state.advisorOpen = false;   // любое закрытие (Escape, фон, крестик, кнопка) снимает флаг советника
   state.modal = null; $('#modal').hidden = true; $('#modal').innerHTML = '';
   document.querySelectorAll('.top, .stage').forEach(el => el.removeAttribute('inert'));
   if (modalOpener && document.contains(modalOpener)) modalOpener.focus();
@@ -393,7 +397,7 @@ function closeModal() {
 }
 document.addEventListener('keydown', e => {
   if (e.key !== 'Tab' || !state.modal) return;
-  const els = Array.from($('#modal').querySelectorAll('button:not([disabled]), [tabindex]:not([tabindex="-1"])'));
+  const els = Array.from($('#modal').querySelectorAll('button:not([disabled]), [href], input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'));
   if (!els.length) return;
   const first = els[0], last = els[els.length - 1];
   if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
@@ -524,7 +528,9 @@ async function post(url, payload, extraHeaders) {
 }
 
 async function refreshResult() {
-  state.explain = null; state.candidates = null; state.chat = [];
+  // новое поколение: ответы советника прошлого набора игнорируются, их флаги загрузки снимаются здесь
+  state.explain = null; state.candidates = null; state.candidatesError = null; state.chat = [];
+  state.explainBusy = false; state.improveBusy = false; state.chatBusy = false;
   const gen = ++state.gen;
   if (state.offline || state.decisions.length !== state.city.decisions_required) {
     state.result = null; state.pending = false;
@@ -549,34 +555,45 @@ function renderActions() {
   const ready = !!(state.result && state.result.valid) && !state.pending;
   box.innerHTML = `<button type="button" class="btn" id="btn-explain" ${ready ? '' : 'disabled'}>Объяснить</button>
     <button type="button" class="btn btn--ghost" id="btn-improve" ${ready ? '' : 'disabled'}>Найти улучшение</button>
-    ${state.explain || state.candidates ? `<button type="button" class="btn btn--ghost plan__reopen" id="btn-advisor">Открыть советника</button>` : ''}`;
+    ${state.explain || state.candidates || state.candidatesError || state.chat.length ? `<button type="button" class="btn btn--ghost plan__reopen" id="btn-advisor">Открыть советника</button>` : ''}`;
   st.textContent = state.pending ? 'Считаем…' : ready ? 'Пять решений приняты. Советник готов.' : state.result && !state.result.valid ? 'Исправьте набор, чтобы получить советы.' : `Выберите ${state.city.decisions_required} мер, и советник разберёт план.`;
   $('#btn-explain').addEventListener('click', () => { openAdvisor(); explainPlan(); });
   $('#btn-improve').addEventListener('click', () => { openAdvisor(); findImprovements(); });
   const ba = $('#btn-advisor'); if (ba) ba.addEventListener('click', openAdvisor);
 }
 
+/* текст ошибки запроса для пользователя: сообщение сервера, иначе код ответа, иначе сеть */
+function errText(e) {
+  const m = e?.detail?.errors?.[0]?.message || (typeof e?.detail === 'string' ? e.detail : null);
+  if (m) return String(m);
+  if (e?.status) return `сервер ответил кодом ${e.status}`;
+  return 'сервер недоступен или нет сети';
+}
+
 async function explainPlan() {
   if (!state.result?.valid || state.explainBusy) return;
-  const key = state.result.scenario_key;
+  const gen = state.gen, key = state.result.scenario_key;
   state.explainBusy = true; renderAdvisor();
-  try {
-    const x = await post('/api/explain', body());
-    if (state.result?.scenario_key === key) { state.explain = x; if (x.candidates) state.candidates = x.candidates; }
-  } catch (e) {
-    if (state.result?.scenario_key === key) state.explain = { mode: 'error', reason: String(e.detail?.errors?.[0]?.message || e.message) };
-  }
-  state.explainBusy = false; renderAdvisor();
-  if (!state.advisorOpen) openAdvisor();
+  let x = null, err = null;
+  try { x = await post('/api/explain', body()); } catch (e) { err = e; }
+  // ответ устаревшего набора не записываем: его флаги уже снял refreshResult
+  if (gen !== state.gen || state.result?.scenario_key !== key) return;
+  if (err) state.explain = { mode: 'error', reason: errText(err) };
+  else { state.explain = x; if (x.candidates) { state.candidates = x.candidates; state.candidatesError = null; } }
+  state.explainBusy = false;
+  renderAdvisor();   // окно открывает только пользователь; если оно открыто, содержимое обновится
 }
 
 async function findImprovements() {
-  if (!state.result?.valid) return;
-  const key = state.result.scenario_key;
-  try {
-    const j = await post('/api/improvements', body());
-    if (state.result?.scenario_key === key) state.candidates = j.candidates || [];
-  } catch (e) { state.candidates = []; }
+  if (!state.result?.valid || state.improveBusy) return;
+  const gen = state.gen, key = state.result.scenario_key;
+  state.improveBusy = true; state.candidatesError = null; renderAdvisor();
+  let j = null, err = null;
+  try { j = await post('/api/improvements', body()); } catch (e) { err = e; }
+  if (gen !== state.gen || state.result?.scenario_key !== key) return;
+  if (err) { state.candidatesError = errText(err); state.candidates = null; }
+  else { state.candidates = j.candidates || []; }   // пустой список от сервера означает «не найдено»
+  state.improveBusy = false;
   renderAdvisor();
 }
 
@@ -594,15 +611,18 @@ function applyCandidate(id) {
 
 async function sendChat(text) {
   if (!state.result?.valid || state.chatBusy || !text.trim()) return;
+  const gen = state.gen, key = state.result.scenario_key;
   state.chat.push({ role: 'user', content: text.trim() });
   state.chatBusy = true; renderAdvisor();
+  let j = null, err = null;
   try {
     const payload = JSON.parse(body()); payload.messages = state.chat.slice(-20).map(m => ({ role: m.role, content: m.content }));
-    const j = await post('/api/chat', JSON.stringify(payload));
-    state.chat.push({ role: 'assistant', content: j.reply, mode: j.mode, checked: j.numbers_checked });
-  } catch (e) {
-    state.chat.push({ role: 'assistant', content: 'Не удалось получить ответ: ' + (e.detail?.errors?.[0]?.message || e.message), mode: 'error' });
-  }
+    j = await post('/api/chat', JSON.stringify(payload));
+  } catch (e) { err = e; }
+  // набор сменился, пока ждали ответ: история уже очищена, ответ прошлого набора в неё не попадает
+  if (gen !== state.gen || state.result?.scenario_key !== key) return;
+  if (err) state.chat.push({ role: 'assistant', content: 'Не удалось получить ответ: ' + errText(err), mode: 'error' });
+  else state.chat.push({ role: 'assistant', content: j.reply, mode: j.mode, checked: j.numbers_checked });
   state.chatBusy = false; renderAdvisor();
   const log = $('#chat-log'); if (log) log.scrollTop = log.scrollHeight;
 }
@@ -659,7 +679,9 @@ function renderAdvisor() {
       ${mode === 'template' ? `<p class="advisor__empty">Разбор собран автоматически на основе расчёта, без нейросети.</p>` : ''}`;
   }
   const cands = state.candidates;
-  const candHtml = cands == null ? '' : cands.length === 0 ? '<h4>Улучшения</h4><p class="advisor__empty">Улучшений заменой одной меры не найдено.</p>'
+  const candHtml = state.improveBusy ? '<h4>Улучшения</h4><p class="advisor__empty"><span class="spinner"></span>Перебираем замены одной меры…</p>'
+    : state.candidatesError ? `<h4>Улучшения</h4><p class="advisor__empty advisor__err">Не удалось получить замены: ${esc(state.candidatesError)}</p><p><button type="button" class="btn btn--sm" id="btn-improve-retry">Повторить</button></p>`
+    : cands == null ? '' : cands.length === 0 ? '<h4>Улучшения</h4><p class="advisor__empty">Улучшений заменой одной меры не найдено.</p>'
     : `<h4>Проверенные замены одной меры</h4>` + cands.map(c => {
       const a = measureById(c.replace.measure_id), b = measureById(c.with.measure_id);
       const where = d => d.district_id ? districtById(d.district_id).name : 'весь город';
@@ -675,6 +697,7 @@ function renderAdvisor() {
   const bd = $('#advisor-badge'); if (bd) bd.innerHTML = badge;
   box.innerHTML = `${bodyHtml}${candHtml}${chatHtml}`;
   box.querySelectorAll('[data-apply]').forEach(b => b.addEventListener('click', () => applyCandidate(b.dataset.apply)));
+  const retry = $('#btn-improve-retry'); if (retry) retry.addEventListener('click', findImprovements);
   $('#chat-form').addEventListener('submit', e => { e.preventDefault(); const inp = $('#chat-input'); const t = inp.value; inp.value = ''; sendChat(t); });
 }
 
@@ -721,30 +744,61 @@ function openSettings() {
 }
 const GEAR = '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3h0a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8v0a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>';
 
+/* ---------- онбординг: три шага при первом входе ---------- */
+const ONB = [
+  { img: '/static/img/advisor.png', kicker: 'Шаг 1 из 3', title: 'Вы аким на пять часов', lead: 'Под вашим управлением 5 районов города: Есиль, Алматы, Сарыарка, Байконур и Нура.',
+    points: ['У каждого района 10 показателей по шкале от 0 до 100.', 'Ваш бюджет: <b>100</b> единиц.', 'За всё время вы можете принять ровно <b>5</b> решений.', 'Задача: поднять общий балл города и не бросить самый слабый район.'] },
+  { img: '/static/img/ic-school.png', kicker: 'Шаг 2 из 3', title: 'Стройте', lead: 'Справа список из 14 мер.',
+    points: ['Нажмите меру и выберите район. Постройка появится на карте.', 'Из одного направления можно взять не больше <b>двух</b> мер.', 'Некоторые меры нельзя ставить вместе. Бюджет превысить нельзя.'] },
+  { img: '/static/img/patrol-dog.png', kicker: 'Шаг 3 из 3', title: 'Результат и совет', lead: 'После пятого решения город пересчитается.',
+    points: ['Вы увидите новый балл и что изменилось в каждом районе.', 'Советник скажет, что вышло хорошо, а что рискованно, и предложит замену.', 'Робот-собака Go2 ходит по городу и показывает, где больше всего сигналов.'] },
+];
+function openOnboarding(step = 0) {
+  const o = ONB[step];
+  if (!state.modal || !state.modal.onboarding) { modalOpener = document.activeElement; document.querySelectorAll('.top, .stage').forEach(el => el.setAttribute('inert', '')); }
+  state.modal = { onboarding: step };
+  const box = $('#modal'); box.hidden = false;
+  box.innerHTML = `<div class="dlg dlg--onb" role="dialog" aria-modal="true" aria-label="${esc(o.title)}">
+    <div class="dlg__head onb__head"><img class="onb__img" src="${o.img}" alt=""><div><div class="dlg__kicker">${o.kicker}</div><h3>${esc(o.title)}</h3></div>
+      <button type="button" class="dlg__x" data-skip aria-label="Закрыть">×</button></div>
+    <div class="dlg__sec onb__sec"><p class="onb__lead">${esc(o.lead)}</p><ul class="onb__list">${o.points.map(p => `<li>${p}</li>`).join('')}</ul></div>
+    <div class="dlg__foot onb__foot"><div class="onb__dots">${ONB.map((_, i) => `<i class="${i === step ? 'on' : ''}"></i>`).join('')}</div>
+      ${step > 0 ? '<button type="button" class="btn btn--ghost" data-prev>Назад</button>' : '<button type="button" class="btn btn--ghost" data-skip>Пропустить</button>'}
+      ${step < ONB.length - 1 ? '<button type="button" class="btn" data-next>Далее</button>' : '<button type="button" class="btn btn--good" data-skip>Начать</button>'}</div>
+  </div>`;
+  const done = () => { try { localStorage.setItem('akim.onboarded', '1'); } catch (e) {} closeModal(); };
+  box.querySelectorAll('[data-skip]').forEach(b => b.addEventListener('click', done));
+  const n = box.querySelector('[data-next]'); if (n) n.addEventListener('click', () => openOnboarding(step + 1));
+  const p = box.querySelector('[data-prev]'); if (p) p.addEventListener('click', () => openOnboarding(step - 1));
+  box.onclick = e => { if (e.target === box) done(); };
+  (box.querySelector('[data-next]') || box.querySelector('.btn--good')).focus();
+}
+
 function openHow() {
   const c = state.city;
-  const syn = c.synergies.map(x => `<li><b>${x.measures.join(' + ')}</b>: ${x.indicator} +${x.bonus} в районе меры ${x.district_of}</li>`).join('');
-  const inc = c.incompatibilities.map(x => `<li><b>${x.measures.join(' и ')}</b>: ${x.scope === 'any' ? 'нельзя вместе нигде' : 'нельзя в одном районе'}${x.reason ? ', ' + esc(x.reason) : ''}</li>`).join('');
+  const syn = c.synergies.map(x => `<li><b>${x.measures.join(' + ')}</b>: ${x.indicator} получает ещё +${x.bonus} в районе меры ${x.district_of}</li>`).join('');
+  const inc = c.incompatibilities.map(x => `<li><b>${x.measures.join(' и ')}</b>: ${x.scope === 'any' ? 'нельзя брать вместе' : 'нельзя ставить в один район'}${x.reason ? '. ' + esc(x.reason) : ''}</li>`).join('');
   modalOpener = document.activeElement;
   document.querySelectorAll('.top, .stage').forEach(el => el.setAttribute('inert', ''));
   state.modal = { how: true };
   const box = $('#modal'); box.hidden = false;
-  box.innerHTML = `<div class="dlg dlg--how" role="dialog" aria-modal="true" aria-label="Как считается Score">
-    <div class="dlg__head"><div><div class="dlg__kicker">Правила игры</div><h3>Как считается Astana Quality of Life Score</h3></div></div>
+  box.innerHTML = `<div class="dlg dlg--how" role="dialog" aria-modal="true" aria-label="Как считается балл">
+    <div class="dlg__head"><div><div class="dlg__kicker">Правила</div><h3>Как считается балл города</h3></div><button type="button" class="dlg__x" data-close aria-label="Закрыть">×</button></div>
     <div class="dlg__sec"><h4>Ход игры</h4>
-      <ol class="how__steps"><li>У вас бюджет <b>${c.budget}</b> единиц и пять районов с десятью показателями от 0 до 100.</li><li>Выберите ровно <b>${c.decisions_required}</b> мер из ${c.measures.length}. Для районной меры укажите район, городская действует на все районы.</li><li>После пятого решения сервер пересчитывает показатели и Score, советник объясняет результат.</li></ol></div>
+      <ol class="how__steps"><li>У вас <b>${c.budget}</b> единиц бюджета и пять районов. У каждого района десять показателей от 0 до 100.</li><li>Выберите ровно <b>${c.decisions_required}</b> мер из ${c.measures.length}. Для районной меры укажите район. Городская мера действует на все районы.</li><li>После пятого решения сервер пересчитает показатели и балл. Советник объяснит результат.</li></ol></div>
     <div class="dlg__sec"><h4>Формула</h4>
-      <div class="how__formula">Score = 0,7 × средний по городу + 0,3 × слабейший район − число показателей ниже ${c.critical_threshold}</div>
-      <ul class="how__list"><li>Эффект меры умножается на (${c.horizon} − задержка) / ${c.horizon}: чем позже мера заработает, тем меньше даст за горизонт.</li><li>Средний по городу взвешен по доле населения районов.</li><li>Слабейший район даёт 30 % веса: нельзя вытянуть один район и забыть про остальные. На карте он отмечен кольцом и подписью «слабейший район», бейдж с цифрой показывает число показателей ниже ${c.critical_threshold}.</li><li>Каждый показатель ниже ${c.critical_threshold} отнимает балл.</li></ul></div>
+      <div class="how__formula">Балл = 0,7 × средний по городу + 0,3 × слабейший район − число показателей ниже ${c.critical_threshold}</div>
+      <ul class="how__list"><li>Мера начинает работать не сразу. Чем больше задержка, тем меньше она даст за два года.</li><li>Средний по городу считается с учётом населения районов.</li><li>Слабейший район весит 30 %. Поэтому нельзя вложить всё в один район.</li><li>Каждый показатель ниже ${c.critical_threshold} отнимает один балл. Слабейший район отмечен на карте кольцом, цифра рядом показывает, сколько у него таких показателей.</li></ul></div>
     <div class="dlg__sec"><h4>Ограничения</h4>
-      <ul class="how__list"><li>Бюджет ${c.budget}, остаток не сгорает и не даёт бонуса.</li><li>Каждая мера один раз, не более ${c.max_per_direction} мер из одного направления.</li></ul>
-      <h4 style="margin-top:12px">Синергии</h4><ul class="how__list">${syn}</ul>
-      <h4 style="margin-top:12px">Несовместимости</h4><ul class="how__list">${inc}</ul></div>
-    <div class="dlg__foot"><button type="button" class="btn" data-close>Понятно</button></div>
+      <ul class="how__list"><li>Остаток бюджета не сгорает и ничего не даёт.</li><li>Каждую меру можно взять один раз. Из одного направления не больше ${c.max_per_direction}.</li></ul>
+      <h4 style="margin-top:12px">Пары, которые усиливают друг друга</h4><ul class="how__list">${syn}</ul>
+      <h4 style="margin-top:12px">Пары, которые нельзя сочетать</h4><ul class="how__list">${inc}</ul></div>
+    <div class="dlg__foot"><button type="button" class="btn btn--ghost" data-onb>Показать обучение</button><button type="button" class="btn" data-close>Понятно</button></div>
   </div>`;
-  box.querySelector('[data-close]').addEventListener('click', closeModal);
+  box.querySelector('[data-onb]').addEventListener('click', () => { closeModal(); openOnboarding(0); });
+  box.querySelectorAll('[data-close]').forEach(b => b.addEventListener('click', closeModal));
   box.onclick = e => { if (e.target === box) closeModal(); };
-  box.querySelector('[data-close]').focus();
+  box.querySelector('.dlg__foot [data-close]').focus();
 }
 
 async function init() {
@@ -757,6 +811,7 @@ async function init() {
   $('#btn-reset').addEventListener('click', () => { state.animGen++; state.decisions = []; afterChange(); renderMarks(); });
   $('#btn-example').addEventListener('click', applyExample);
   $('#btn-how').addEventListener('click', openHow);
+  if (!state.decisions.length) setTimeout(() => openOnboarding(0), 600);
   $('#btn-settings').addEventListener('click', openSettings);
   $('#btn-settings').innerHTML = GEAR;
 }

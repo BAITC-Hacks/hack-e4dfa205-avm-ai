@@ -17,22 +17,27 @@ const ROUTE = [
 ];
 const DIST = { esil: 'Есиль', almaty: 'Алматы', saryarka: 'Сарыарка', baikonur: 'Байконур', nura: 'Нура' };
 
-/* Сценарий событий: район, показатель симулятора, текст, статус. */
+/* Названия показателей симулятора для ленты: код внутри, пользователю показываем слово. */
+const KNAME = { C1: 'ЖКХ', B1: 'безопасность улиц', B2: 'дорожное движение', E2: 'воздух' };
+
+/* Сценарий событий: район, показатель симулятора, текст, адресат (to) или статус (s).
+   Это заранее заданный сценарий демонстрации: события никуда не отправляются, в ленте так и подписано. */
+const DEMO_NOTE = 'демонстрация: событие не отправляется';
 const EVENTS = [
-  { d: 'nura', k: 'C1', t: 'Открытый люк на проезжей части, крышка отсутствует', s: 'передано в ЖКХ', lvl: 'warn' },
-  { d: 'almaty', k: 'B2', t: 'Яма на дороге глубиной более 10 см у пешеходного перехода', s: 'передано в дорожную службу', lvl: 'warn' },
-  { d: 'saryarka', k: 'E2', t: 'Газоанализатор: превышение CO у частного сектора', s: 'уведомлён экологический контроль', lvl: 'bad' },
-  { d: 'esil', k: 'B1', t: 'Скопление людей у здания акимата, около 40 человек', s: 'наблюдаю', lvl: 'info' },
-  { d: 'baikonur', k: 'B1', t: 'Ребёнок без сопровождения у стройплощадки', s: 'оператор уведомлён', lvl: 'bad' },
-  { d: 'almaty', k: 'B1', t: 'Совпадение с ориентировкой по силуэту и одежде', s: 'передано в дежурную часть', lvl: 'bad' },
-  { d: 'nura', k: 'B1', t: 'Неработающий фонарь на пешеходной дорожке', s: 'передано в ЖКХ', lvl: 'warn' },
-  { d: 'saryarka', k: 'C1', t: 'Парение из теплотрассы, возможный порыв', s: 'передано в теплосети', lvl: 'warn' },
-  { d: 'esil', k: 'B2', t: 'Автомобиль на велодорожке у набережной', s: 'зафиксировано, номер распознан', lvl: 'info' },
-  { d: 'baikonur', k: 'C1', t: 'Переполненная контейнерная площадка', s: 'передано в ЖКХ', lvl: 'info' },
-  { d: 'nura', k: 'E2', t: 'Дым от сжигания мусора в частном секторе', s: 'уведомлён экологический контроль', lvl: 'warn' },
-  { d: 'almaty', k: 'B2', t: 'Ребёнок перебегает дорогу вне перехода у школы', s: 'оператор уведомлён', lvl: 'warn' },
-  { d: 'nura', k: 'B1', t: 'Разбитое остекление остановки', s: 'передано в ЖКХ', lvl: 'info' },
-  { d: 'saryarka', k: 'B1', t: 'Маршрут пройден, отклонений нет', s: 'патруль продолжается', lvl: 'ok' },
+  { d: 'nura', k: 'C1', t: 'Открытый люк на проезжей части, крышка отсутствует', to: 'ЖКХ', lvl: 'warn' },
+  { d: 'almaty', k: 'B2', t: 'Яма на дороге глубиной более 10 см у пешеходного перехода', to: 'дорожная служба', lvl: 'warn' },
+  { d: 'saryarka', k: 'E2', t: 'Газоанализатор: превышение CO у частного сектора', to: 'экологический контроль', lvl: 'bad' },
+  { d: 'esil', k: 'B1', t: 'Скопление людей у здания акимата, около 40 человек', s: 'наблюдение по сценарию', lvl: 'info' },
+  { d: 'baikonur', k: 'B1', t: 'Ребёнок без сопровождения у стройплощадки', to: 'оператор', lvl: 'bad' },
+  { d: 'almaty', k: 'B1', t: 'Совпадение с ориентировкой по силуэту и одежде', to: 'дежурная часть', lvl: 'bad' },
+  { d: 'nura', k: 'B1', t: 'Неработающий фонарь на пешеходной дорожке', to: 'ЖКХ', lvl: 'warn' },
+  { d: 'saryarka', k: 'C1', t: 'Парение из теплотрассы, возможный порыв', to: 'теплосети', lvl: 'warn' },
+  { d: 'esil', k: 'B2', t: 'Автомобиль на велодорожке у набережной', s: 'зафиксировано в сценарии', lvl: 'info' },
+  { d: 'baikonur', k: 'C1', t: 'Переполненная контейнерная площадка', to: 'ЖКХ', lvl: 'info' },
+  { d: 'nura', k: 'E2', t: 'Дым от сжигания мусора в частном секторе', to: 'экологический контроль', lvl: 'warn' },
+  { d: 'almaty', k: 'B2', t: 'Ребёнок перебегает дорогу вне перехода у школы', to: 'оператор', lvl: 'warn' },
+  { d: 'nura', k: 'B1', t: 'Разбитое остекление остановки', to: 'ЖКХ', lvl: 'info' },
+  { d: 'saryarka', k: 'B1', t: 'Маршрут пройден, отклонений нет', s: 'демонстрационный патруль продолжается', lvl: 'ok' },
 ];
 
 const state = { pos: 0, t: 0, feed: [], idx: 0, open: false, timer: null, raf: null, counts: {} };
@@ -42,8 +47,8 @@ function ensureMarker() {
   if (m) return m;
   m = document.createElement('button');
   m.type = 'button'; m.id = 'patrol-marker'; m.className = 'patrol-marker';
-  m.setAttribute('aria-label', 'Робот-собака Go2 на патруле: открыть камеру');
-  m.innerHTML = `<span class="patrol-ring"></span><img src="/static/img/patrol-dog.png" alt=""><span class="patrol-tag">Go2 · патруль</span>`;
+  m.setAttribute('aria-label', 'Робот-собака Go2, демонстрация патруля: открыть окно камеры');
+  m.innerHTML = `<span class="patrol-ring"></span><img src="/static/img/patrol-dog.png" alt=""><span class="patrol-tag">Go2 · демо-патруль</span>`;
   m.addEventListener('click', openCamera);
   $('#map-marks').appendChild(m);
   return m;
@@ -74,8 +79,8 @@ function pushEvent() {
 function renderFeed() {
   const box = $('#patrol-feed'); if (!box) return;
   box.innerHTML = state.feed.map((e, i) => `<div class="patrol-ev patrol-ev--${e.lvl}${i === 0 ? ' patrol-ev--new' : ''}">
-    <div class="patrol-ev__top"><span class="patrol-ev__time">${e.time}</span><span class="patrol-ev__d">${DIST[e.d]}</span><span class="patrol-ev__k">${e.k}</span></div>
-    <div class="patrol-ev__t">${esc(e.t)}</div><div class="patrol-ev__s">${esc(e.s)}</div></div>`).join('');
+    <div class="patrol-ev__top"><span class="patrol-ev__time">${e.time}</span><span class="patrol-ev__d">${DIST[e.d]}</span><span class="patrol-ev__k">${esc(KNAME[e.k] || e.k)}</span></div>
+    <div class="patrol-ev__t">${esc(e.t)}</div><div class="patrol-ev__s">${e.to ? `адресат: ${esc(e.to)} · ${DEMO_NOTE}` : esc(e.s)}</div></div>`).join('');
   const counts = Object.entries(state.counts).sort((a, b) => b[1] - a[1]);
   const top = counts[0];
   const weak = weakestDistrict();
@@ -95,21 +100,22 @@ function openCamera() {
   state.open = true;
   const box = document.createElement('div');
   box.className = 'patrol-modal'; box.id = 'patrol-modal';
-  box.innerHTML = `<div class="patrol-dlg" role="dialog" aria-modal="true" aria-label="Камера робота-собаки Go2">
-    <div class="patrol-dlg__head"><div><div class="patrol-kicker">Безопасный город · робот-собака Go2</div><h3>Камера патруля</h3></div>
+  box.innerHTML = `<div class="patrol-dlg" role="dialog" aria-modal="true" aria-label="Камера робота-собаки Go2, демонстрация концепции">
+    <div class="patrol-dlg__head"><div><div class="patrol-kicker">Безопасный город · робот-собака Go2 · демо</div><h3>Камера патруля</h3></div>
       <button type="button" class="patrol-close" aria-label="Закрыть">×</button></div>
+    <div class="patrol-demo" role="note">Демонстрация концепции: камера и события заранее заданы, реального робота и потока нет.</div>
     <div class="patrol-body">
       <div class="patrol-cam">
-        <img src="/static/img/patrol-cam.jpg" alt="Кадр с камеры робота-собаки">
-        <div class="patrol-ovl patrol-ovl--tl"><span class="patrol-rec"></span>LIVE · RTSP H.264 · 640×480 · 15 fps</div>
+        <img src="/static/img/patrol-cam.jpg" alt="Демонстрационный кадр: как выглядел бы кадр с камеры робота-собаки">
+        <div class="patrol-ovl patrol-ovl--tl"><span class="patrol-rec"></span>ДЕМО · запись · 640×480</div>
         <div class="patrol-ovl patrol-ovl--tr" id="patrol-clock"></div>
-        <div class="patrol-ovl patrol-ovl--bl">ЦОУ · оператор 3 · <span id="patrol-where"></span></div>
-        <div class="patrol-ovl patrol-ovl--br">Go2 · батарея 74 % · 4,1 км/ч</div>
-        <div class="patrol-box" style="left:39%;top:44%;width:22%;height:11%"><span>открытый люк · 0,96</span></div>
+        <div class="patrol-ovl patrol-ovl--bl">демонстрация · район: <span id="patrol-where"></span></div>
+        <div class="patrol-ovl patrol-ovl--br">Go2 · телеметрия условная</div>
+        <div class="patrol-box" style="left:39%;top:44%;width:22%;height:11%"><span>открытый люк · пример разметки</span></div>
         <div class="patrol-cross"></div>
       </div>
       <div class="patrol-side">
-        <div class="patrol-side__h">Лента ИИ-агента</div>
+        <div class="patrol-side__h">Лента событий · сценарий демо</div>
         <div class="patrol-feed" id="patrol-feed"></div>
         <div class="patrol-counts" id="patrol-counts"></div>
       </div>
