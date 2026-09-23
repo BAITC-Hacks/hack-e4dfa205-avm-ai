@@ -59,7 +59,7 @@ def test_explain_without_key_is_fallback(client, monkeypatch):
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     ex.clear_cache()
     j = client.post("/api/explain", json=EX).json()
-    assert j["mode"] == "fallback" and j["reason"] == "not_configured"
+    assert j["mode"] == "template" and j["reason"] == "not_configured"
     assert j["scenario_key"] and j["explanation"]["summary"] and j["facts"] and "candidates" in j
 
 

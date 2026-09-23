@@ -1,13 +1,15 @@
 # engine/explain.py
 from __future__ import annotations
+import hashlib
 import json
 import os
 import re
 from collections import OrderedDict
 from .model import City
 from .facts import fallback_explanation
+from .templates import template_explanation
 
-PROMPT_VERSION = "akim-explain-v1"
+PROMPT_VERSION = "akim-explain-v2"
 MAX_CACHE = 100
 _cache: "OrderedDict[str, dict]" = OrderedDict()
 
@@ -18,11 +20,20 @@ SYSTEM_PROMPT = (
     "Тебе дан список фактов с идентификаторами f1..fN, каждый факт уже посчитан программой. "
     "Объясни результат человеческим языком: короткое резюме, 2–3 сильные стороны, 2–3 риска или компромисса, "
     "и по одному комментарию к каждой альтернативе c1..c3, если они переданы. "
+    "Называй меры по названию, а не только по коду, и привязывай каждый риск к конкретному району или показателю. "
     "Правила: не придумывай числа, меры и районы; используй только числа из фактов и только в том виде, как они там записаны; "
     "каждое утверждение опирается на факты и перечисляет их идентификаторы в fact_ids; "
     "в suggestions используй только переданные candidate_id; пиши по-русски, коротко, без общих фраз. "
     "Ответ строго JSON без других ключей: {\"summary\": str, \"strengths\": [{\"text\": str, \"fact_ids\": [str]}], "
     "\"risks\": [{\"text\": str, \"fact_ids\": [str]}], \"suggestions\": [{\"candidate_id\": str, \"text\": str, \"fact_ids\": [str]}]}"
+)
+
+CHAT_PROMPT = (
+    "Ты советник акима Астаны в учебном симуляторе городского бюджета. Отвечай на вопросы пользователя о его плане. "
+    "Ниже факты о текущем плане, они посчитаны программой, и список лучших планов из полного перебора. "
+    "Правила: опирайся только на эти факты; не придумывай числа, меры и районы; если ответа в фактах нет, скажи об этом; "
+    "советы давай конкретные: какую меру на какую заменить и что это даст, ссылаясь на альтернативы или лучшие планы. "
+    "Отвечай по-русски, коротко, до 120 слов, обычным текстом без JSON."
 )
 
 
@@ -34,22 +45,35 @@ def clear_cache() -> None:
     _cache.clear()
 
 
-def api_key() -> str:
+def server_key() -> str:
     return os.environ.get("OPENAI_API_KEY", "").strip()
+
+
+def resolve_key(user_key: str | None) -> str:
+    """Ключ из запроса имеет приоритет над серверным."""
+    return (user_key or "").strip() or server_key()
+
+
+def api_key() -> str:
+    """Совместимость со старым app.py: серверный ключ."""
+    return server_key()
 
 
 def model_name() -> str:
     return os.environ.get("OPENAI_MODEL", "gpt-4o-mini").strip() or "gpt-4o-mini"
 
 
-def call_openai(facts: list, candidates: list) -> tuple:
-    """Реальный вызов OpenAI. Возвращает (текст ответа, имя модели)."""
+def _client(key: str):
     from openai import OpenAI
     timeout = float(os.environ.get("LLM_TIMEOUT_S", "15") or 15)
-    client = OpenAI(api_key=api_key(), timeout=timeout, max_retries=0)
+    return OpenAI(api_key=key, timeout=timeout, max_retries=0)
+
+
+def call_openai(facts: list, candidates: list, key: str) -> tuple:
+    """Реальный вызов OpenAI для структурированного объяснения. Возвращает (текст ответа, имя модели)."""
     payload = {"facts": [{"id": f["id"], "kind": f["kind"], "text": f["text"]} for f in facts],
                "candidate_ids": [c["id"] for c in candidates]}
-    resp = client.chat.completions.create(
+    resp = _client(key).chat.completions.create(
         model=model_name(), temperature=0.3, response_format={"type": "json_object"},
         messages=[{"role": "system", "content": SYSTEM_PROMPT},
                   {"role": "user", "content": json.dumps(payload, ensure_ascii=False)}],
@@ -57,8 +81,27 @@ def call_openai(facts: list, candidates: list) -> tuple:
     return resp.choices[0].message.content, model_name()
 
 
-def _allowed_numbers(facts: list) -> set:
-    vals = set()
+def call_openai_chat(system: str, messages: list, key: str) -> tuple:
+    resp = _client(key).chat.completions.create(
+        model=model_name(), temperature=0.4,
+        messages=[{"role": "system", "content": system}] + messages,
+    )
+    return resp.choices[0].message.content, model_name()
+
+
+def check_key(key: str) -> dict:
+    """Минимальный запрос, чтобы проверить ключ. Ключ не сохраняется и не логируется."""
+    if not key:
+        return {"ok": False, "error": "Ключ не передан"}
+    try:
+        _client(key).models.retrieve(model_name())
+        return {"ok": True, "model": model_name()}
+    except Exception as e:
+        return {"ok": False, "error": type(e).__name__}
+
+
+def _allowed_numbers(facts: list, extra: list | None = None) -> set:
+    vals = set(extra or [])
 
     def walk(x):
         if isinstance(x, bool):
@@ -137,19 +180,30 @@ def validate_answer(text: str, facts: list, candidates: list) -> dict:
     return out
 
 
-def explain(city: City, result: dict, candidates: list, facts: list, call_model=None) -> dict:
-    """call_model(facts, candidates) -> (text, model). По умолчанию реальный OpenAI."""
+def _key_tag(key: str) -> str:
+    return hashlib.sha256(key.encode()).hexdigest()[:8] if key else "server"
+
+
+def explain(city: City, result: dict, candidates: list, facts: list, call_model=None,
+            user_key: str | None = None, index: dict | None = None, rank: dict | None = None) -> dict:
+    """Живое объяснение с ключом (из запроса или сервера), иначе банк ответов из шаблонов.
+    call_model(facts, candidates, key) -> (text, model) подменяется в тестах."""
     call = call_model or call_openai
-    key = f"{city.version}|{PROMPT_VERSION}|{model_name()}|{result['scenario_key']}"
-    if key in _cache:
-        return _cache[key]
-    base = {"scenario_key": result["scenario_key"], "facts": facts}
+    key = resolve_key(user_key)
+    tag = _key_tag((user_key or "").strip())
+    cache_key = f"{city.version}|{PROMPT_VERSION}|{model_name()}|{tag}|{result['scenario_key']}"
+    template = template_explanation(city, result, candidates, facts, index, rank)
+    base = {"scenario_key": result["scenario_key"], "facts": facts, "rank": rank, "comparison": template["comparison"],
+            "key_source": "user" if (user_key or "").strip() else ("server" if server_key() else None)}
     try:
-        if not api_key():
+        if not key:
             raise NotConfigured()
-        text, model = call(facts, candidates)
+        cached = _cache.get(cache_key)
+        if cached and cached[0] is call:  # кэш действует только для того же провайдера
+            return cached[1]
+        text, model = call(facts, candidates, key)
         out = {**base, "mode": "live", "model": model, "reason": None, "explanation": validate_answer(text, facts, candidates)}
-        _cache[key] = out
+        _cache[cache_key] = (call, out)
         while len(_cache) > MAX_CACHE:
             _cache.popitem(last=False)
         return out
@@ -157,4 +211,38 @@ def explain(city: City, result: dict, candidates: list, facts: list, call_model=
         reason = "not_configured"
     except Exception as e:  # таймаут, сеть, сломанный JSON, неверная схема, выдуманные числа
         reason = type(e).__name__
-    return {**base, "mode": "fallback", "model": None, "reason": reason, "explanation": fallback_explanation(facts, candidates)}
+    return {**base, "mode": "template", "model": None, "reason": reason,
+            "explanation": {k: template[k] for k in ("summary", "strengths", "risks", "suggestions")}}
+
+
+def chat(city: City, result: dict, candidates: list, facts: list, index: dict | None, rank: dict | None,
+         messages: list, user_key: str | None = None, call_model=None) -> dict:
+    """Диалог с советником. Без ключа возвращает mode=unavailable. Числа в ответе проверяются по фактам."""
+    key = resolve_key(user_key)
+    if not key:
+        return {"mode": "unavailable", "reply": "Диалог с советником доступен только с ключом OpenAI: серверным или введённым в интерфейсе.", "numbers_checked": False, "model": None}
+    template = template_explanation(city, result, candidates, facts, index, rank)
+    top_lines = []
+    if index:
+        for t in index["top"][:5]:
+            top_lines.append(f"{t['rank']}. Score {t['score']:.2f}, стоимость {t['cost']}: " +
+                             "; ".join(f"«{city.measures[d['measure_id']].name}» ({d['measure_id']}, " + (city.district(d['district_id']).name if d.get('district_id') else "весь город") + ")" for d in t["decisions"]))
+    system = (CHAT_PROMPT + "\n\nФакты о текущем плане:\n" + "\n".join(f"{f['id']}: {f['text']}" for f in facts) +
+              "\n\nСравнение с лучшим планом: " + (template["comparison"] or "нет данных") +
+              "\n\nЛучшие планы из полного перебора:\n" + ("\n".join(top_lines) or "нет данных"))
+    trimmed = [{"role": m["role"], "content": str(m["content"])[:2000]} for m in messages[-10:] if m.get("role") in ("user", "assistant")]
+    if not trimmed or trimmed[-1]["role"] != "user":
+        return {"mode": "error", "reply": "Последнее сообщение должно быть от пользователя.", "numbers_checked": False, "model": None}
+    call = call_model or call_openai_chat
+    try:
+        text, model = call(system, trimmed, key)
+    except Exception as e:
+        return {"mode": "error", "reply": f"Модель недоступна: {type(e).__name__}. Расчёт и шаблонное объяснение работают.", "numbers_checked": False, "model": None}
+    extra = []
+    if index:
+        for t in index["top"][:5]:
+            extra += [t["score"], t["cost"], t["rank"]]
+        extra += [index["total"], index["score_max"]]
+    # Лексическая проверка: каждое число ответа есть среди чисел расчёта. Смысл утверждений она не подтверждает.
+    numbers_checked = _numbers_ok(text, _allowed_numbers(facts, extra))
+    return {"mode": "live", "reply": text.strip(), "numbers_checked": numbers_checked, "model": model}
