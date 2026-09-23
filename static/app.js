@@ -780,8 +780,9 @@ function openOnboarding(step = 0) {
 
 function openHow() {
   const c = state.city;
-  const syn = c.synergies.map(x => `<li><b>${x.measures.join(' + ')}</b>: ${x.indicator} получает ещё +${x.bonus} в районе меры ${x.district_of}</li>`).join('');
-  const inc = c.incompatibilities.map(x => `<li><b>${x.measures.join(' и ')}</b>: ${x.scope === 'any' ? 'нельзя брать вместе' : 'нельзя ставить в один район'}${x.reason ? '. ' + esc(x.reason) : ''}</li>`).join('');
+  const mn = id => esc((measureById(id) || { name: id }).name); const indN = code => esc(((c.indicators || []).find(i => i.code === code) || { name: code }).name).toLowerCase();
+  const syn = c.synergies.map(x => `<li><b>${mn(x.measures[0])}</b> плюс <b>${mn(x.measures[1])}</b>: показатель «${indN(x.indicator)}» получает ещё +${x.bonus} балла там, где стоит ${mn(x.district_of)}</li>`).join('');
+  const inc = c.incompatibilities.map(x => `<li><b>${mn(x.measures[0])}</b> и <b>${mn(x.measures[1])}</b>: ${x.scope === 'any' ? 'в одном плане не бывают' : 'в один район не ставятся'}${x.reason ? ' (' + esc(x.reason) + ')' : ''}</li>`).join('');
   modalOpener = document.activeElement;
   document.querySelectorAll('.top, .stage').forEach(el => el.setAttribute('inert', ''));
   state.modal = { how: true };
@@ -789,14 +790,14 @@ function openHow() {
   box.innerHTML = `<div class="dlg dlg--how" role="dialog" aria-modal="true" aria-label="Как считается балл">
     <div class="dlg__head"><div><div class="dlg__kicker">Правила</div><h3>Как считается балл города</h3></div><button type="button" class="dlg__x" data-close aria-label="Закрыть">×</button></div>
     <div class="dlg__sec"><h4>Ход игры</h4>
-      <ol class="how__steps"><li>У вас <b>${c.budget}</b> единиц бюджета и пять районов. У каждого района десять показателей от 0 до 100.</li><li>Выберите ровно <b>${c.decisions_required}</b> мер из ${c.measures.length}. Для районной меры укажите район. Городская мера действует на все районы.</li><li>После пятого решения сервер пересчитает показатели и балл. Советник объяснит результат.</li></ol></div>
+      <ol class="how__steps"><li>Вы аким. У города пять районов, у каждого десять показателей от 0 до 100: дороги, школы, воздух и так далее. В казне <b>${c.budget}</b> единиц.</li><li>Постройте ровно <b>${c.decisions_required}</b> объектов из ${c.measures.length} возможных. Школу или парк ставите в один район, а светофоры или платформу обращений получает весь город.</li><li>Как только пятый объект встал на карту, город пересчитывается: вы видите новый балл, что изменилось в районах и что об этом думает советник.</li></ol></div>
     <div class="dlg__sec"><h4>Формула</h4>
-      <div class="how__formula">Балл = 0,7 × средний по городу + 0,3 × слабейший район − число показателей ниже ${c.critical_threshold}</div>
-      <ul class="how__list"><li>Мера начинает работать не сразу. Чем больше задержка, тем меньше она даст за два года.</li><li>Средний по городу считается с учётом населения районов.</li><li>Слабейший район весит 30 %. Поэтому нельзя вложить всё в один район.</li><li>Каждый показатель ниже ${c.critical_threshold} отнимает один балл. Слабейший район отмечен на карте кольцом, цифра рядом показывает, сколько у него таких показателей.</li></ul></div>
+      <div class="how__formula">Балл = 0,7 × средний по городу + 0,3 × самый слабый район − число провалов ниже ${c.critical_threshold}</div>
+      <ul class="how__list"><li>Стройка занимает время. Парк откроется через полгода, а ЛРТ только через год, поэтому за два года ЛРТ успеет дать лишь половину своего эффекта.</li><li>Средний балл по городу считается с поправкой на население: Есиль, где живёт четверть горожан, весит больше, чем Байконур.</li><li>Треть итога зависит от самого слабого района. Можно отстроить один район и всё равно проиграть, если другой остался в провале.</li><li>Каждый показатель ниже ${c.critical_threshold} это провал, и за каждый город теряет балл. На карте самый слабый район обведён кольцом, а цифра рядом с ним показывает, сколько у него провалов.</li></ul></div>
     <div class="dlg__sec"><h4>Ограничения</h4>
-      <ul class="how__list"><li>Остаток бюджета не сгорает и ничего не даёт.</li><li>Каждую меру можно взять один раз. Из одного направления не больше ${c.max_per_direction}.</li></ul>
-      <h4 style="margin-top:12px">Пары, которые усиливают друг друга</h4><ul class="how__list">${syn}</ul>
-      <h4 style="margin-top:12px">Пары, которые нельзя сочетать</h4><ul class="how__list">${inc}</ul></div>
+      <ul class="how__list"><li>Неистраченные деньги никуда не деваются, но и пользы не приносят: балл за экономию не растёт.</li><li>Каждый объект строится один раз. Из одной сферы, например транспорта, можно взять не больше ${c.max_per_direction} объектов.</li></ul>
+      <h4 style="margin-top:12px">Что работает лучше вместе</h4><ul class="how__list">${syn}</ul>
+      <h4 style="margin-top:12px">Что вместе не строится</h4><ul class="how__list">${inc}</ul></div>
     <div class="dlg__foot"><button type="button" class="btn btn--ghost" data-onb>Показать обучение</button><button type="button" class="btn" data-close>Понятно</button></div>
   </div>`;
   box.querySelector('[data-onb]').addEventListener('click', () => { closeModal(); openOnboarding(0); });
