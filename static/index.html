@@ -5,26 +5,26 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Аким на 5 часов</title>
 <meta name="description" content="AI-симулятор управления городом: пять решений, бюджет 100, Astana Quality of Life Score">
-<link rel="stylesheet" href="/static/app.css?v=12">
+<link rel="stylesheet" href="/static/app.css?v=23">
 </head>
 <body>
 
 <header class="top" id="top">
   <div class="top__brand">
     <h1 class="top__title">Аким на 5 часов</h1>
-    <p class="top__sub">AI-симулятор управления городом · <span class="tag">учебная модель</span></p>
+    <p class="top__sub">AI-симулятор управления городом</p>
   </div>
   <div class="budget" id="budget"></div>
   <div class="counter" id="counter"></div>
   <div class="top__actions">
-    <button type="button" class="btn" id="btn-example">Пример из ТЗ</button>
+    <button type="button" class="btn" id="btn-example">Готовый сценарий</button>
     <button type="button" class="btn btn--ghost" id="btn-reset">Сброс</button>
-    <button type="button" class="btn btn--ghost" id="btn-how" aria-expanded="false" aria-controls="how">Как считается</button>
+    <button type="button" class="btn btn--ghost" id="btn-how">Как считается</button>
+    <button type="button" class="btn btn--ghost btn--icon" id="btn-settings" aria-label="Настройки" title="Настройки"></button>
   </div>
 </header>
 
 <div class="notice" id="notice" role="status" aria-live="polite" hidden></div>
-<section class="how" id="how" hidden></section>
 
 <main class="stage" id="stage">
   <div class="stage__map" id="stage-map">
@@ -53,13 +53,12 @@
       <div id="tabs" hidden></div>
       <div class="ledger__body" id="cards"></div>
     </section>
-    <div class="advisor card" id="advisor" hidden></div>
-    <p class="side__foot">Данные, меры и формула заданы условиями задачи 12 хакатона HackAlem AI. Районы и показатели условные.</p>
   </aside>
 </main>
 
 <div class="modal" id="modal" hidden></div>
 
-<script src="/static/app.js?v=14"></script>
+<script src="/static/patrol.js?v=1"></script>
+<script src="/static/app.js?v=18"></script>
 </body>
 </html>

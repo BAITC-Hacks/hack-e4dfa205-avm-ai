@@ -396,8 +396,8 @@ function renderModal() {
   const keyInd = Object.keys(m.effects)[0];
   const dsel = m.type === 'district' ? `<div class="dlg__sec"><h4>Район</h4><div class="dsel">${state.city.districts.map(d => {
       const cur = d.indicators[keyInd];
-      return `<button type="button" data-d="${d.id}" aria-pressed="${district === d.id}">${esc(d.name)}<small class="${cur < state.city.critical_threshold ? 'low' : ''}">${keyInd} ${cur}</small></button>`;
-    }).join('')}</div><div class="dlg__note">Под названием: текущее значение показателя, на который мера влияет сильнее всего. Эффект достанется только выбранному району.</div></div>`
+      return `<button type="button" data-d="${d.id}" aria-pressed="${district === d.id}">${esc(d.name)}<small class="${cur < state.city.critical_threshold ? 'low' : ''}">${cur}</small></button>`;
+    }).join('')}</div><div class="dlg__note">Под названием: текущее значение показателя «${esc((state.city.indicators.find(i => i.code === keyInd) || {}).name || keyInd).toLowerCase()}», на который мера влияет сильнее всего. Эффект достанется только выбранному району.</div></div>`
     : `<div class="dlg__sec"><div class="dlg__note">Городская мера: эффект получат все пять районов.</div></div>`;
   const syn = state.city.synergies.filter(x => x.measures.includes(m.id)).map(x => {
     const other = x.measures.find(y => y !== m.id); const has = state.decisions.some(d => d.measure_id === other);
@@ -535,10 +535,12 @@ function renderActions() {
   const box = $('#plan-actions'), st = $('#plan-status');
   const ready = !!(state.result && state.result.valid) && !state.pending;
   box.innerHTML = `<button type="button" class="btn" id="btn-explain" ${ready ? '' : 'disabled'}>Объяснить</button>
-    <button type="button" class="btn btn--ghost" id="btn-improve" ${ready ? '' : 'disabled'}>Найти улучшение</button>`;
+    <button type="button" class="btn btn--ghost" id="btn-improve" ${ready ? '' : 'disabled'}>Найти улучшение</button>
+    ${state.explain || state.candidates ? `<button type="button" class="btn btn--ghost plan__reopen" id="btn-advisor">Открыть советника</button>` : ''}`;
   st.textContent = state.pending ? 'Считаем…' : ready ? 'Пять решений приняты. Советник готов.' : state.result && !state.result.valid ? 'Исправьте набор, чтобы получить советы.' : `Выберите ${state.city.decisions_required} мер, и советник разберёт план.`;
-  $('#btn-explain').addEventListener('click', explainPlan);
-  $('#btn-improve').addEventListener('click', findImprovements);
+  $('#btn-explain').addEventListener('click', () => { openAdvisor(); explainPlan(); });
+  $('#btn-improve').addEventListener('click', () => { openAdvisor(); findImprovements(); });
+  const ba = $('#btn-advisor'); if (ba) ba.addEventListener('click', openAdvisor);
 }
 
 async function explainPlan() {
@@ -552,6 +554,7 @@ async function explainPlan() {
     if (state.result?.scenario_key === key) state.explain = { mode: 'error', reason: String(e.detail?.errors?.[0]?.message || e.message) };
   }
   state.explainBusy = false; renderAdvisor();
+  if (!state.advisorOpen) openAdvisor();
 }
 
 async function findImprovements() {
@@ -567,8 +570,12 @@ async function findImprovements() {
 function applyCandidate(id) {
   const c = (state.candidates || []).find(x => x.id === id);
   if (!c) return;
+  const before = state.decisions.map(d => d.measure_id + ':' + (d.district_id || ''));
   state.decisions = c.decisions.map(d => ({ ...d }));
-  afterChange(); renderMarks();
+  if (state.advisorOpen) closeAdvisor();
+  afterChange();
+  $('#map-marks').innerHTML = '';
+  state.decisions.forEach(d => { const key = d.measure_id + ':' + (d.district_id || ''); dropMarker(d, !before.includes(key)); });
   sfx('build');
 }
 
@@ -597,10 +604,28 @@ function factText(ids) {
   return ids.map(id => facts.find(f => f.id === id)?.text).filter(Boolean).join('\n');
 }
 
+function openAdvisor() {
+  if (state.advisorOpen) return;
+  state.advisorOpen = true;
+  modalOpener = document.activeElement;
+  document.querySelectorAll('.top, .stage').forEach(el => el.setAttribute('inert', ''));
+  state.modal = { advisor: true };
+  const box = $('#modal'); box.hidden = false;
+  box.innerHTML = `<div class="dlg dlg--advisor" role="dialog" aria-modal="true" aria-label="Советник акима">
+    <div class="dlg__head"><div class="dlg__gear">${ADVISOR_ICON}</div><div><div class="dlg__kicker">AI-советник</div><h3>Советник акима</h3><div class="dlg__meta" id="advisor-badge"></div></div>
+      <button type="button" class="dlg__x" data-close aria-label="Закрыть">×</button></div>
+    <div class="advisor" id="advisor"></div>
+  </div>`;
+  box.querySelector('[data-close]').addEventListener('click', closeAdvisor);
+  box.onclick = e => { if (e.target === box) closeAdvisor(); };
+  renderAdvisor();
+}
+function closeAdvisor() { state.advisorOpen = false; closeModal(); }
+const ADVISOR_ICON = '<svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l1.8 4.6L18.5 9l-4.7 1.4L12 15l-1.8-4.6L5.5 9l4.7-1.4z"/><path d="M5 17l.8 2 2 .8-2 .8L5 22.6l-.8-2-2-.8 2-.8z"/><path d="M19 15l.6 1.5 1.5.6-1.5.6L19 19.2l-.6-1.5-1.5-.6 1.5-.6z"/></svg>';
 function renderAdvisor() {
   const box = $('#advisor');
-  if (!state.result?.valid || state.pending) { box.hidden = true; box.innerHTML = ''; return; }
-  box.hidden = false;
+  if (!box || !state.advisorOpen) return;
+  if (!state.result?.valid || state.pending) { box.innerHTML = '<p class="advisor__empty">Соберите пять решений, и советник разберёт план.</p>'; return; }
   const x = state.explain;
   const mode = x ? x.mode : null;
   const badge = state.explainBusy ? '<span class="mode"><span class="spinner"></span>думаем</span>'
@@ -610,7 +635,7 @@ function renderAdvisor() {
   const stmt = it => `<li>${esc(it.text)}${it.fact_ids?.length ? `<span class="fid" title="${esc(factText(it.fact_ids))}">${it.fact_ids.join(' ')}</span>` : ''}</li>`;
   let bodyHtml = '';
   if (state.explainBusy) bodyHtml = '<p class="advisor__empty"><span class="spinner"></span>Советник читает расчёт…</p>';
-  else if (!x) bodyHtml = '<p class="advisor__empty">Нажмите «Объяснить»: советник разберёт сильные стороны, риски и предложит замены. Без ключа OpenAI ответ соберётся из расчёта.</p>';
+  else if (!x) bodyHtml = '<p class="advisor__empty">Нажмите «Объяснить»: советник разберёт сильные стороны, риски и предложит замены. Ключ OpenAI подключается в настройках, без него ответ соберётся из расчёта.</p>';
   else if (mode === 'error') bodyHtml = `<p class="advisor__empty">Не удалось получить объяснение: ${esc(x.reason || '')}</p>`;
   else {
     const e = x.explanation;
@@ -629,20 +654,13 @@ function renderAdvisor() {
       return `<div class="alt"><div class="alt__body"><b>${fmt(c.score)}</b> (${sgn(c.delta)}) · бюджет ${c.cost}<small>${esc(a.name)} (${esc(where(c.replace))}) → ${esc(b.name)} (${esc(where(c.with))})</small>${note ? `<small>${esc(note.text)}</small>` : ''}</div>
         <button type="button" class="btn btn--sm" data-apply="${c.id}">Применить</button></div>`;
     }).join('');
-  const ks = state.keyStatus;
-  const keyHtml = `<h4>Ключ OpenAI</h4>
-    <div class="keyrow"><input type="password" id="key-input" placeholder="sk-… (необязательно)" value="${esc(state.key)}" autocomplete="off" spellcheck="false">
-      <button type="button" class="btn btn--sm btn--ghost" id="key-check">Проверить</button></div>
-    <div class="advisor__empty">${ks ? (ks.ok ? `Работает: ${esc(ks.model)}, источник: ${ks.key_source === 'user' ? 'ваш ключ' : 'ключ сервера'}` : `Ключ не принят: ${esc(ks.error || '')}`) : 'Ключ уходит только на этот сервер с каждым запросом и не сохраняется. Без ключа объяснение собирается из расчёта.'}</div>`;
   const chatHtml = `<h4>Спросить советника</h4>
     <div class="chat" id="chat-log">${state.chat.map(m => `<div class="msg msg--${m.role}${m.mode === 'error' ? ' msg--err' : ''}">${esc(m.content)}${m.role === 'assistant' && m.mode === 'live' && m.checked === false ? '<small>числа не сверены с расчётом</small>' : ''}</div>`).join('')}${state.chatBusy ? '<div class="msg msg--assistant"><span class="spinner"></span>…</div>' : ''}</div>
     <form class="chatrow" id="chat-form"><input type="text" id="chat-input" placeholder="Например: что поменять, чтобы обогнать лучший план?" maxlength="500" ${state.chatBusy ? 'disabled' : ''}><button type="submit" class="btn btn--sm" ${state.chatBusy ? 'disabled' : ''}>Отправить</button></form>
-    <div class="advisor__empty">Диалог работает только с ключом OpenAI.</div>`;
-  box.innerHTML = `<div class="advisor__head"><h3>Советник акима</h3>${badge}</div>${bodyHtml}${candHtml}${keyHtml}${chatHtml}`;
+    <div class="advisor__empty">Диалог работает только с ключом OpenAI (шестерёнка в шапке).</div>`;
+  const bd = $('#advisor-badge'); if (bd) bd.innerHTML = badge;
+  box.innerHTML = `${bodyHtml}${candHtml}${chatHtml}`;
   box.querySelectorAll('[data-apply]').forEach(b => b.addEventListener('click', () => applyCandidate(b.dataset.apply)));
-  const ki = $('#key-input');
-  ki.addEventListener('change', () => { state.key = ki.value.trim(); try { sessionStorage.setItem('akim.key', state.key); } catch (e) {} state.keyStatus = null; });
-  $('#key-check').addEventListener('click', () => { state.key = ki.value.trim(); try { sessionStorage.setItem('akim.key', state.key); } catch (e) {} checkKey(); });
   $('#chat-form').addEventListener('submit', e => { e.preventDefault(); const inp = $('#chat-input'); const t = inp.value; inp.value = ''; sendChat(t); });
 }
 
@@ -657,13 +675,62 @@ function applyExample() {
 }
 state.animGen = 0;
 
-function renderHow() {
-  const box = $('#how');
-  box.innerHTML = `<h2>Как считается Score</h2>
-    <p>У каждого района десять показателей от 0 до 100. Мера прибавляет свой эффект, умноженный на (8 − лаг) / 8: чем позже мера заработает, тем меньше успеет дать за два года. Синергии дают фиксированный бонус без лага. После всех прибавок значения обрезаются в 0–100.</p>
-    <div class="formula">Score = 0,7 × средний по городу + 0,3 × слабейший район − число показателей ниже 40</div>
-    <ul><li>Средний по городу взвешен по доле населения районов.</li><li>Слабейший район это район с наименьшей оценкой после решений.</li><li>Каждый показатель ниже 40 отнимает балл.</li></ul>
-    <p>Правила: ровно 5 решений, бюджет 100, каждая мера один раз, не больше 2 мер из одного направления, несовместимые пары запрещены.</p>`;
+function openSettings() {
+  modalOpener = document.activeElement;
+  document.querySelectorAll('.top, .stage').forEach(el => el.setAttribute('inert', ''));
+  state.modal = { settings: true };
+  const box = $('#modal'); box.hidden = false;
+  box.innerHTML = `<div class="dlg dlg--settings" role="dialog" aria-modal="true" aria-label="Настройки">
+    <div class="dlg__head"><div class="dlg__gear">${GEAR}</div><div><div class="dlg__kicker">Настройки</div><h3>Подключение AI-советника</h3>
+      <div class="dlg__meta"><span>Ключ отправляется только на этот сервер и хранится в памяти вкладки</span></div></div></div>
+    <div class="dlg__sec"><h4>Ключ OpenAI</h4>
+      <div class="keyrow"><input type="password" id="key-input" placeholder="sk-…" value="${esc(state.key)}" autocomplete="off" spellcheck="false"><button type="button" class="btn" id="key-check">Проверить</button></div>
+      <div class="dlg__note" id="key-status"></div></div>
+    <div class="dlg__sec"><h4>Как это работает</h4>
+      <ul class="how__list"><li>Числа считает сервер по формуле, модель их только объясняет.</li><li>С ключом: живое объяснение и диалог с советником.</li><li>Без ключа: объяснение собирается из фактов расчёта.</li></ul></div>
+    <div class="dlg__foot"><button type="button" class="btn btn--ghost" data-clear>Убрать ключ</button><button type="button" class="btn" data-close>Готово</button></div>
+  </div>`;
+  const status = () => {
+    const ks = state.keyStatus, el = $('#key-status');
+    el.className = 'dlg__note' + (ks ? (ks.ok ? ' good' : ' bad') : '');
+    el.textContent = ks ? (ks.ok ? `Работает: ${ks.model}, источник: ${ks.key_source === 'user' ? 'ваш ключ' : 'ключ сервера'}` : `Ключ не принят: ${ks.error || ''}`) : (state.key ? 'Ключ введён, нажмите «Проверить».' : 'Ключ не задан. Если ключ задан на сервере, советник использует его.');
+  };
+  status();
+  const ki = $('#key-input');
+  const save = () => { state.key = ki.value.trim(); try { sessionStorage.setItem('akim.key', state.key); } catch (e) {} };
+  ki.addEventListener('change', () => { save(); state.keyStatus = null; status(); });
+  $('#key-check').addEventListener('click', async () => { save(); $('#key-check').disabled = true; await checkKey(); $('#key-check').disabled = false; status(); if (typeof renderAdvisor === 'function') renderAdvisor(); });
+  box.querySelector('[data-clear]').addEventListener('click', () => { ki.value = ''; save(); state.keyStatus = null; status(); });
+  box.querySelector('[data-close]').addEventListener('click', closeModal);
+  box.onclick = e => { if (e.target === box) closeModal(); };
+  ki.focus();
+}
+const GEAR = '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3h0a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8v0a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>';
+
+function openHow() {
+  const c = state.city;
+  const syn = c.synergies.map(x => `<li><b>${x.measures.join(' + ')}</b>: ${x.indicator} +${x.bonus} в районе меры ${x.district_of}</li>`).join('');
+  const inc = c.incompatibilities.map(x => `<li><b>${x.measures.join(' и ')}</b>: ${x.scope === 'any' ? 'нельзя вместе нигде' : 'нельзя в одном районе'}${x.reason ? ', ' + esc(x.reason) : ''}</li>`).join('');
+  modalOpener = document.activeElement;
+  document.querySelectorAll('.top, .stage').forEach(el => el.setAttribute('inert', ''));
+  state.modal = { how: true };
+  const box = $('#modal'); box.hidden = false;
+  box.innerHTML = `<div class="dlg dlg--how" role="dialog" aria-modal="true" aria-label="Как считается Score">
+    <div class="dlg__head"><div><div class="dlg__kicker">Правила игры</div><h3>Как считается Astana Quality of Life Score</h3></div></div>
+    <div class="dlg__sec"><h4>Ход игры</h4>
+      <ol class="how__steps"><li>У вас бюджет <b>${c.budget}</b> единиц и пять районов с десятью показателями от 0 до 100.</li><li>Выберите ровно <b>${c.decisions_required}</b> мер из ${c.measures.length}. Для районной меры укажите район, городская действует на все районы.</li><li>После пятого решения сервер пересчитывает показатели и Score, советник объясняет результат.</li></ol></div>
+    <div class="dlg__sec"><h4>Формула</h4>
+      <div class="how__formula">Score = 0,7 × средний по городу + 0,3 × слабейший район − число показателей ниже ${c.critical_threshold}</div>
+      <ul class="how__list"><li>Эффект меры умножается на (${c.horizon} − лаг) / ${c.horizon}: чем позже мера заработает, тем меньше даст за горизонт.</li><li>Средний по городу взвешен по доле населения районов.</li><li>Слабейший район даёт 30 % веса: нельзя вытянуть один район и забыть про остальные.</li><li>Каждый показатель ниже ${c.critical_threshold} отнимает балл.</li></ul></div>
+    <div class="dlg__sec"><h4>Ограничения</h4>
+      <ul class="how__list"><li>Бюджет ${c.budget}, остаток не сгорает и не даёт бонуса.</li><li>Каждая мера один раз, не более ${c.max_per_direction} мер из одного направления.</li></ul>
+      <h4 style="margin-top:12px">Синергии</h4><ul class="how__list">${syn}</ul>
+      <h4 style="margin-top:12px">Несовместимости</h4><ul class="how__list">${inc}</ul></div>
+    <div class="dlg__foot"><button type="button" class="btn" data-close>Понятно</button></div>
+  </div>`;
+  box.querySelector('[data-close]').addEventListener('click', closeModal);
+  box.onclick = e => { if (e.target === box) closeModal(); };
+  box.querySelector('[data-close]').focus();
 }
 
 async function init() {
@@ -671,12 +738,13 @@ async function init() {
   renderMapStatic();
   initView();
   loadDraft();
-  renderHow();
   renderHeader(); renderTabs(); renderCards(); renderPlan(); renderMarks(); renderScore(); renderPlaques(); renderActions(); renderAdvisor();
   refreshResult();
   $('#btn-reset').addEventListener('click', () => { state.animGen++; state.decisions = []; afterChange(); renderMarks(); });
   $('#btn-example').addEventListener('click', applyExample);
-  $('#btn-how').addEventListener('click', () => { const h = $('#how'); h.hidden = !h.hidden; $('#btn-how').setAttribute('aria-expanded', String(!h.hidden)); });
+  $('#btn-how').addEventListener('click', openHow);
+  $('#btn-settings').addEventListener('click', openSettings);
+  $('#btn-settings').innerHTML = GEAR;
 }
 init();
 
