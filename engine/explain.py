@@ -272,6 +272,8 @@ def chat(city: City, result: dict, candidates: list, facts: list, index: dict | 
     call = call_model or call_openai_chat
     try:
         text, model = call(system, trimmed, key)
+        if not isinstance(text, str) or not text.strip():
+            raise ValueError("empty model reply")
     except Exception as e:
         return {"mode": "error", "reply": f"Модель недоступна: {type(e).__name__}. Расчёт и шаблонное объяснение работают.", "numbers_checked": False, "model": None}
     extra = []
